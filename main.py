@@ -1107,10 +1107,9 @@ def _fix_link_annotations(doc, annot_colors: dict, rendered_extents: dict):
             if orig_width <= 0:
                 continue
 
-            # Check if link covers most of the line (TOC-style) or a small part (inline)
-            link_width = lr.x1 - lr.x0
-            if link_width / orig_width > 0.5:
-                # TOC-style: link covers most of the line -> adjust to rendered text
+            # Check if link starts near the line start (TOC-style) or is inline
+            if abs(lr.x0 - orig_x0) < 5:
+                # Link starts at line start -> adjust to cover rendered text extent
                 adj_x0 = new_x0
                 adj_x1 = new_text_end
             else:
