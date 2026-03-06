@@ -1364,6 +1364,11 @@ def _render_math_span(page, orig_page, ms: Span, x: float,
     if prefix == "CMEX" and any(ch not in CMEX_CHAR_MAP for ch in ms.text if ch.strip()):
         return _copy_original_glyph(page, orig_page, ms, x, baseline_y)
 
+    # CMSY combining characters (e.g. U+0338 "not" slash) need original glyph
+    # because they overlay the next character and can't render standalone
+    if prefix == "CMSY" and any(ord(ch) < 0x20 or ch == '\u0338' for ch in ms.text if ch.strip()):
+        return _copy_original_glyph(page, orig_page, ms, x, baseline_y)
+
     # Determine font to use
     if style == "math":
         m_font_name = MATH_FONT_NAME
