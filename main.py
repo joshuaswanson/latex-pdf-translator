@@ -23,7 +23,7 @@ from deep_translator import GoogleTranslator
 TEXT_FONT_PREFIXES = ("SFRM", "SFBX", "SFBI", "SFTI")
 
 # Font prefix -> style mapping
-BOLD_FONT_PREFIXES = ("SFBX",)
+BOLD_FONT_PREFIXES = ("SFBX", "SFBI")
 ITALIC_FONT_PREFIXES = ("SFTI", "SFBI")
 
 FONT_DIR = Path(__file__).parent
@@ -79,10 +79,15 @@ CMEX_CHAR_MAP = {
 
 # rsfs script letter mapping (rsfs extracts as plain letters, need Unicode script)
 RSFS_CHAR_MAP = {
-    "C": "\U0001D49E", "D": "\U0001D49F", "O": "\U0001D4AA",
-    "R": "\u211B", "S": "\U0001D4AE", "L": "\u2112",
-    "F": "\u2131", "B": "\u212C", "H": "\u210B", "I": "\u2110",
-    "M": "\u2133", "P": "\U0001D4AB", "T": "\U0001D4AF",
+    "A": "\U0001D49C", "B": "\u212C", "C": "\U0001D49E",
+    "D": "\U0001D49F", "E": "\u2130", "F": "\u2131",
+    "G": "\U0001D4A2", "H": "\u210B", "I": "\u2110",
+    "J": "\U0001D4A5", "K": "\U0001D4A6", "L": "\u2112",
+    "M": "\u2133", "N": "\U0001D4A9", "O": "\U0001D4AA",
+    "P": "\U0001D4AB", "Q": "\U0001D4AC", "R": "\u211B",
+    "S": "\U0001D4AE", "T": "\U0001D4AF", "U": "\U0001D4B0",
+    "V": "\U0001D4B1", "W": "\U0001D4B2", "X": "\U0001D4B3",
+    "Y": "\U0001D4B4", "Z": "\U0001D4B5",
 }
 
 # Build math italic letter mapping (a-z -> U+1D44E..., A-Z -> U+1D434...)
@@ -115,6 +120,22 @@ for i, ch in enumerate("abcdefghijklmnopqrstuvwxyz"):
     MATH_BOLD_MAP[ch] = chr(0x1D41A + i)
 for i, ch in enumerate("0123456789"):
     MATH_BOLD_MAP[ch] = chr(0x1D7CE + i)
+
+# Euler Fraktur (EUFM) letter mapping
+EUFM_CHAR_MAP = {}
+_FRAKTUR_UPPER = 0x1D504
+for i, ch in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
+    cp = _FRAKTUR_UPPER + i
+    # Unicode assigns some Fraktur letters to different code points
+    if ch == "C": cp = 0x212D
+    elif ch == "H": cp = 0x210C
+    elif ch == "I": cp = 0x2111
+    elif ch == "R": cp = 0x211C
+    elif ch == "Z": cp = 0x2128
+    EUFM_CHAR_MAP[ch] = chr(cp)
+_FRAKTUR_LOWER = 0x1D51E
+for i, ch in enumerate("abcdefghijklmnopqrstuvwxyz"):
+    EUFM_CHAR_MAP[ch] = chr(_FRAKTUR_LOWER + i)
 
 # Google Translate batch size (max 5000 chars per request)
 BATCH_CHARS = 4800
@@ -166,6 +187,8 @@ TERM_FIXES = {
     "let's demonstrate": "let us prove",
     "we demonstrate": "we prove",
     "one demonstrates": "one proves",
+    "whatever ": "for all ",
+    "Whatever ": "For all ",
     "Demonstration": "Proof",
     "demonstration": "proof",
     "Th\u00e9or\u00e8me": "Theorem",
@@ -251,6 +274,17 @@ def extract_lines(doc) -> list[TranslatableLine]:
             if _is_english_block(block_text):
                 continue
 
+            # Index page numbers that are standalone lines (for TOC)
+            # These appear as separate lines at the same y as the TOC entry
+            line_page_nums = {}  # int(y) -> (page_num_str, right_edge)
+            for ld in block["lines"]:
+                all_text = "".join(s["text"] for s in ld["spans"]).strip()
+                if re.match(r'^\d{1,3}$', all_text):
+                    y = ld["bbox"][1]
+                    entry = (all_text, ld["bbox"][2])
+                    line_page_nums[int(y)] = entry
+                    line_page_nums[int(y) + 1] = entry  # tolerance
+
             for line_data in block["lines"]:
                 spans = []
                 for s in line_data["spans"]:
@@ -310,6 +344,16 @@ def extract_lines(doc) -> list[TranslatableLine]:
                 toc_page_num = ""
                 if is_toc:
                     toc_content, toc_page_num = _parse_toc_line(template)
+                    # Page number may be in a separate line at same y
+                    if not toc_page_num:
+                        y_key = int(line_data["bbox"][1])
+                        pn_entry = line_page_nums.get(y_key)
+                        if pn_entry:
+                            toc_page_num = pn_entry[0]
+                            # Extend bbox to include page number's right edge
+                            bbox = list(line_data["bbox"])
+                            bbox[2] = pn_entry[1]
+                            line_data = dict(line_data, bbox=bbox)
 
                 # Determine dominant font style from text spans
                 font_style = _dominant_font_style(spans)
@@ -698,21 +742,33 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
             continue
         page_lines.setdefault(line.page_idx, []).append((line, translated))
 
+    # Track rendered text extents for link rectangle adjustment
+    rendered_extents = {}  # (page_idx, round(y_mid)) -> (x0, text_end_x)
+
+    # Collect link annotation colors from ALL pages before any redaction
+    all_annot_colors = {}  # (page_idx, round_x0, round_y0) -> (r, g, b)
+    for page_idx in range(len(work_doc)):
+        page = work_doc[page_idx]
+        for link in page.get_links():
+            xref = link.get("xref")
+            if not xref:
+                continue
+            key = (page_idx, round(link["from"].x0, 1), round(link["from"].y0, 1))
+            # Read color from raw xref (annot.colors often returns None)
+            raw = work_doc.xref_object(xref)
+            m = re.search(r'/C\s*\[\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\]', raw)
+            if m:
+                all_annot_colors[key] = (float(m.group(1)), float(m.group(2)), float(m.group(3)))
+            else:
+                all_annot_colors[key] = (1, 0, 0)  # default red
+
     changed = 0
     for page_idx in sorted(page_lines):
         page = work_doc[page_idx]
         orig_page = orig_doc[page_idx]
 
-        # Save link annotations with their visual properties before redaction
-        saved_links = []
-        for link in page.get_links():
-            saved_links.append(link)
-        # Save annotation border colors (get_links doesn't include these)
-        annot_colors = {}
-        for annot in page.annots():
-            if annot.type[0] == 2:  # Link annotation
-                key = (round(annot.rect.x0, 1), round(annot.rect.y0, 1))
-                annot_colors[key] = annot.colors.get("stroke", (1, 0, 0))
+        # Save link annotations before redaction removes them
+        saved_links = list(page.get_links())
 
         # Phase 1: Add redaction annotations for all lines on this page
         for line, _translated in page_lines[page_idx]:
@@ -722,13 +778,17 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
         # Apply all redactions at once (actually removes underlying content)
         page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE)
 
-        # Restore link annotations with visible colored borders
+        # Restore links removed by redaction and ensure all have colored borders
+        surviving = {
+            (round(l["from"].x0, 1), round(l["from"].y0, 1))
+            for l in page.get_links()
+        }
         for link in saved_links:
             key = (round(link["from"].x0, 1), round(link["from"].y0, 1))
-            stroke = annot_colors.get(key, (1, 0, 0))
-            link["colors"] = {"stroke": stroke}
-            link["border"] = {"width": 1}
-            page.insert_link(link)
+            if key not in surviving:
+                page.insert_link(link)
+
+        # (Link colors are fixed in a post-processing pass after save/reload)
 
         # Register fonts AFTER redactions (redactions can remove font resources)
         for style, name in FONT_NAMES.items():
@@ -743,10 +803,15 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
 
         # Phase 2: Re-render translated text + math glyphs
         for line, translated in page_lines[page_idx]:
-            _render_line_content(page, orig_page, line, translated)
+            text_end_x = _render_line_content(page, orig_page, line, translated)
+            # Record rendered text extent for link rectangle adjustment
+            y_mid = (line.bbox[1] + line.bbox[3]) / 2
+            orig_x0, orig_x1 = line.bbox[0], line.bbox[2]
+            rendered_extents[(page_idx, round(y_mid))] = (orig_x0, orig_x1, line.bbox[0], text_end_x)
             changed += 1
 
     print(f"  {changed} lines modified")
+    return all_annot_colors, rendered_extents
 
 
 def _get_whiteout_rect(page, line: TranslatableLine) -> pymupdf.Rect:
@@ -830,10 +895,16 @@ def _build_style_map(line: TranslatableLine, translated: str) -> list:
 
 
 def _render_line_content(page, orig_page, line: TranslatableLine,
-                         translated: str):
-    """Render translated text + math glyphs onto the page."""
+                         translated: str) -> float:
+    """Render translated text + math glyphs onto the page.
+    Returns x position after rendering content (before TOC dots)."""
     x0, y0, x1, y1 = line.bbox
+    # Use font size from the first text span (not math, which may be subscript-sized)
     fontsize = line.spans[0].size
+    for s in line.spans:
+        if s.is_text and s.text.strip():
+            fontsize = s.size
+            break
 
     # Find baseline from first text span's origin
     baseline_y = y1
@@ -876,12 +947,16 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
             )
             x += font_obj.text_length(text, fontsize=fontsize)
 
+    text_end_x = x  # Position after title text, before dots
+
     # For TOC lines, add dot leaders and page number
     if line.is_toc:
         toc_font_name = FONT_NAMES[line.font_style]
         toc_font_obj = FONT_OBJECTS[line.font_style]
         _render_toc_dots(page, x, baseline_y, fontsize, toc_font_name,
                          toc_font_obj, line)
+
+    return text_end_x
 
 
 def _math_font_prefix(font: str) -> str:
@@ -909,6 +984,8 @@ def _map_math_text(text: str, font_prefix: str) -> str:
     if font_prefix == "CMBX":
         # Math bold: map letters to Unicode math bold code points
         return "".join(MATH_BOLD_MAP.get(ch, ch) for ch in text)
+    if font_prefix == "EUFM":
+        return "".join(EUFM_CHAR_MAP.get(ch, ch) for ch in text)
     return text
 
 
@@ -952,7 +1029,7 @@ def _render_math_span(page, orig_page, ms: Span, x: float,
 def _render_toc_dots(page, x_after_text: float, baseline_y: float,
                      fontsize: float, font_name: str, font_obj,
                      line: TranslatableLine):
-    """Render dot leaders (and right-aligned page number if inline)."""
+    """Render dot leaders and right-aligned page number."""
     right_edge = line.bbox[2]
     dot_unit = font_obj.text_length(". ", fontsize=fontsize)
     dots_start = x_after_text + 4
@@ -990,6 +1067,64 @@ def _render_toc_dots(page, x_after_text: float, baseline_y: float,
                 fontsize=fontsize,
                 color=(0, 0, 0),
             )
+
+
+def _fix_link_annotations(doc, annot_colors: dict, rendered_extents: dict):
+    """Fix link border colors and adjust rectangles to match rendered text."""
+    for page_idx in range(len(doc)):
+        page = doc[page_idx]
+        page_height = page.rect.height
+
+        for link in page.get_links():
+            xref = link.get("xref")
+            if not xref:
+                continue
+            raw_obj = doc.xref_object(xref)
+
+            # Fix border colors
+            if "/C " not in raw_obj:
+                key = (page_idx, round(link["from"].x0, 1), round(link["from"].y0, 1))
+                stroke = annot_colors.get(key, (1, 0, 0))
+                r, g, b = stroke
+                doc.xref_set_key(xref, "C", f"[{r} {g} {b}]")
+            if "/W 0" in raw_obj:
+                doc.xref_set_key(xref, "BS", "<< /W 1 >>")
+
+            # Adjust link rectangle to match rendered text extent
+            lr = link["from"]
+            mid_y = (lr.y0 + lr.y1) / 2
+            # Try exact y match, then +/- 1 for rounding tolerance
+            extent = (rendered_extents.get((page_idx, round(mid_y)))
+                      or rendered_extents.get((page_idx, round(mid_y) + 1))
+                      or rendered_extents.get((page_idx, round(mid_y) - 1)))
+            if not extent:
+                continue
+
+            orig_x0, orig_x1, new_x0, new_text_end = extent
+            orig_width = orig_x1 - orig_x0
+            new_width = new_text_end - new_x0
+
+            if orig_width <= 0:
+                continue
+
+            # Check if link covers most of the line (TOC-style) or a small part (inline)
+            link_width = lr.x1 - lr.x0
+            if link_width / orig_width > 0.5:
+                # TOC-style: link covers most of the line -> adjust to rendered text
+                adj_x0 = new_x0
+                adj_x1 = new_text_end
+            else:
+                # Inline link: proportionally scale position within the line
+                ratio = new_width / orig_width if orig_width > 0 else 1.0
+                rel_x0 = lr.x0 - orig_x0
+                rel_x1 = lr.x1 - orig_x0
+                adj_x0 = new_x0 + rel_x0 * ratio
+                adj_x1 = new_x0 + rel_x1 * ratio
+
+            pdf_y0 = page_height - lr.y1
+            pdf_y1 = page_height - lr.y0
+            doc.xref_set_key(xref, "Rect",
+                             f"[{adj_x0:.3f} {pdf_y0:.3f} {adj_x1:.3f} {pdf_y1:.3f}]")
 
 
 def _parse_segments(translated: str) -> list[dict]:
@@ -1033,12 +1168,18 @@ def main():
 
     # Step 3: Render
     print("\nRendering translations...")
-    render_all(work_doc, orig_doc, lines, translations)
+    annot_colors, rendered_extents = render_all(work_doc, orig_doc, lines, translations)
 
-    # Save
-    work_doc.save(output_path, garbage=4, deflate=True)
+    # Save to bytes, reload, and fix link border colors
+    # (insert_link creates links with xref=0; need save/reload to get real xrefs)
+    pdf_bytes = work_doc.tobytes(garbage=4, deflate=True)
     work_doc.close()
     orig_doc.close()
+
+    doc = pymupdf.open("pdf", pdf_bytes)
+    _fix_link_annotations(doc, annot_colors, rendered_extents)
+    doc.save(output_path, garbage=4, deflate=True)
+    doc.close()
     print(f"\nSaved: {output_path}")
 
 
