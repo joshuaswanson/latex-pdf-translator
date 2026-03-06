@@ -269,6 +269,23 @@ class TranslatableLine:
 
 # -- Extraction -------------------------------------------------------------
 
+def _line_core_y(line):
+    """Get the core y-range of a line, excluding tall math symbols (CMEX).
+
+    Uses non-CMEX span bboxes to avoid tall summation/integral signs from
+    inflating the y-range. For CMEX-only lines, uses origin y with tight range.
+    """
+    core_spans = [s for s in line["spans"] if "CMEX" not in s["font"]]
+    if not core_spans:
+        # All CMEX: use origin y with tight range to prevent false merges
+        origins = [s["origin"][1] for s in line["spans"]]
+        mid = sum(origins) / len(origins)
+        return mid - 3, mid + 3
+    y0 = min(s["bbox"][1] for s in core_spans)
+    y1 = max(s["bbox"][3] for s in core_spans)
+    return y0, y1
+
+
 def _merge_same_y_lines(lines, max_x_gap=8):
     """Merge raw PDF lines that are on the same visual line (y-ranges overlap).
 
@@ -276,18 +293,18 @@ def _merge_same_y_lines(lines, max_x_gap=8):
     and surrounding text are separate PDF "lines" at the same y level.
     Without merging, translated text can overflow into adjacent line areas.
     Only merges lines that are also close in x (gap < max_x_gap points).
+    Uses core y-range (excluding tall CMEX symbols) for overlap detection.
     """
     if len(lines) <= 1:
         return lines
 
-    # Group lines by overlapping y-ranges
+    # Group lines by overlapping core y-ranges (excluding tall CMEX)
     y_groups = []
     for line in lines:
         placed = False
+        ly0, ly1 = _line_core_y(line)
         for group in y_groups:
-            ref = group[0]["bbox"]
-            ly0, ly1 = line["bbox"][1], line["bbox"][3]
-            gy0, gy1 = ref[1], ref[3]
+            gy0, gy1 = _line_core_y(group[0])
             y_overlap = min(ly1, gy1) - max(ly0, gy0)
             min_height = min(ly1 - ly0, gy1 - gy0)
             if min_height > 0 and y_overlap / min_height >= 0.5:
@@ -324,7 +341,16 @@ def _merge_same_y_lines(lines, max_x_gap=8):
                 any(p in s["font"] for p in ("SFRM", "SFBX", "SFBI", "SFTI"))
                 for line in cluster for s in line["spans"]
             )
-            if len(cluster) > 4 or not has_text:
+            # Don't merge if multiple text lines start at left margin
+            # (these are consecutive visual lines, not fragments)
+            left_margin = min(l["bbox"][0] for l in cluster)
+            margin_text_lines = sum(
+                1 for line in cluster
+                if line["bbox"][0] < left_margin + 15
+                and any(p in s["font"] for p in ("SFRM", "SFBX", "SFBI", "SFTI")
+                        for s in line["spans"])
+            )
+            if len(cluster) > 4 or not has_text or margin_text_lines > 1:
                 result.extend(cluster)
             else:
                 # Merge: combine spans sorted by x, union bboxes
@@ -1147,8 +1173,20 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
                         c2 = (s2.bbox[0] + s2.bbox[2]) / 2
                         min_w = min(s1.bbox[2] - s1.bbox[0], s2.bbox[2] - s2.bbox[0])
                         if abs(c1 - c2) < max(min_w * 0.7, 2.0):
-                            stacked.add(gi)
-                            stacked.add(gj)
+                            # Reject if these are sub/superscripts of a base character:
+                            # both start right at the right edge of a preceding span
+                            left_edge = min(s1.bbox[0], s2.bbox[0])
+                            is_sub_super = False
+                            for gk in range(len(group)):
+                                if gk == gi or gk == gj:
+                                    continue
+                                base = group[gk]
+                                if abs(base.bbox[2] - left_edge) < 1.5:
+                                    is_sub_super = True
+                                    break
+                            if not is_sub_super:
+                                stacked.add(gi)
+                                stacked.add(gj)
 
             # Render: stacked spans at same x, sequential spans advance x
             frac_x_start = None
