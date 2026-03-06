@@ -286,6 +286,11 @@ def _line_core_y(line):
     return y0, y1
 
 
+def _is_cmex_only(line):
+    """Check if a line contains only CMEX (tall delimiter/operator) spans."""
+    return all("CMEX" in s["font"] for s in line["spans"])
+
+
 def _merge_same_y_lines(lines, max_x_gap=8):
     """Merge raw PDF lines that are on the same visual line (y-ranges overlap).
 
@@ -294,13 +299,24 @@ def _merge_same_y_lines(lines, max_x_gap=8):
     Without merging, translated text can overflow into adjacent line areas.
     Only merges lines that are also close in x (gap < max_x_gap points).
     Uses core y-range (excluding tall CMEX symbols) for overlap detection.
+    CMEX-only lines are placed into y-groups by x-adjacency to avoid
+    ambiguous y-overlap pulling them into the wrong visual line.
     """
     if len(lines) <= 1:
         return lines
 
-    # Group lines by overlapping core y-ranges (excluding tall CMEX)
-    y_groups = []
+    # Separate CMEX-only lines (tall delimiters/summations with ambiguous y)
+    regular_lines = []
+    cmex_only_lines = []
     for line in lines:
+        if _is_cmex_only(line):
+            cmex_only_lines.append(line)
+        else:
+            regular_lines.append(line)
+
+    # Group regular lines by overlapping core y-ranges
+    y_groups = []
+    for line in regular_lines:
         placed = False
         ly0, ly1 = _line_core_y(line)
         for group in y_groups:
@@ -313,6 +329,28 @@ def _merge_same_y_lines(lines, max_x_gap=8):
                 break
         if not placed:
             y_groups.append([line])
+
+    # Place CMEX-only lines into y-groups by x-adjacency (not y-overlap).
+    # This prevents tall CMEX symbols from being pulled into the wrong
+    # visual line due to ambiguous vertical extent.
+    for cmex_line in cmex_only_lines:
+        cx0 = cmex_line["bbox"][0]
+        cx1 = cmex_line["bbox"][2]
+        best_group = None
+        best_gap = float('inf')
+        for group in y_groups:
+            for gline in group:
+                gx1 = gline["bbox"][2]
+                gx0 = gline["bbox"][0]
+                # Check if CMEX line sits right after or before a group line
+                gap = min(abs(cx0 - gx1), abs(gx0 - cx1))
+                if gap < best_gap:
+                    best_gap = gap
+                    best_group = group
+        if best_group is not None and best_gap < 20:
+            best_group.append(cmex_line)
+        else:
+            y_groups.append([cmex_line])
 
     result = []
     for y_group in y_groups:
@@ -350,7 +388,7 @@ def _merge_same_y_lines(lines, max_x_gap=8):
                 and any(p in s["font"] for p in ("SFRM", "SFBX", "SFBI", "SFTI")
                         for s in line["spans"])
             )
-            if len(cluster) > 4 or not has_text or margin_text_lines > 1:
+            if len(cluster) > 8 or not has_text or margin_text_lines > 1:
                 result.extend(cluster)
             else:
                 # Merge: combine spans sorted by x, union bboxes
