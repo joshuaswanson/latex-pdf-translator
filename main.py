@@ -285,6 +285,9 @@ def extract_lines(doc) -> list[TranslatableLine]:
                     line_page_nums[int(y)] = entry
                     line_page_nums[int(y) + 1] = entry  # tolerance
 
+            math_only_lines = []  # [(bbox, [Span, ...]), ...] for fraction numerators etc.
+            block_lines_start = len(result)  # track where this block's lines start
+
             for line_data in block["lines"]:
                 spans = []
                 for s in line_data["spans"]:
@@ -330,9 +333,13 @@ def extract_lines(doc) -> list[TranslatableLine]:
                             # Math placeholders don't contribute to text_styles
                 template = "".join(parts)
 
-                # Skip lines with no meaningful text
+                # Skip lines with no meaningful text (but remember math-only
+                # lines so we can attach them to nearby translatable lines)
                 text_only = "".join(s.text for s in spans if s.is_text).strip()
                 if not text_only:
+                    if math_spans:
+                        # Math-only line (e.g. fraction numerator) - save for later
+                        math_only_lines.append((line_data["bbox"], math_spans[0]))
                     continue
                 # Skip pure numbers, punctuation, dots
                 if re.match(r'^[\s\d.,;:!?()\[\]/*+=\-]+$', text_only):
@@ -370,6 +377,25 @@ def extract_lines(doc) -> list[TranslatableLine]:
                     font_style=font_style,
                     text_styles=text_styles,
                 ))
+
+            # Attach math-only lines (fraction numerators) to nearby translatable lines
+            for mo_bbox, mo_spans in math_only_lines:
+                mo_y = (mo_bbox[1] + mo_bbox[3]) / 2
+                mo_x = mo_bbox[0]
+                best_line = None
+                best_dist = 20  # max vertical distance to consider
+                for tl in result[block_lines_start:]:
+                    if not tl.math_spans:
+                        continue
+                    tl_y = (tl.bbox[1] + tl.bbox[3]) / 2
+                    dist = abs(mo_y - tl_y)
+                    first_math_x = tl.math_spans[0][0].bbox[0]
+                    if dist < best_dist and abs(mo_x - first_math_x) < 15:
+                        best_dist = dist
+                        best_line = tl
+                if best_line:
+                    # Prepend to the first math group
+                    best_line.math_spans[0] = mo_spans + best_line.math_spans[0]
 
     return result
 
@@ -927,12 +953,46 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
             idx = int(m.group(1))
             if idx >= len(line.math_spans):
                 continue
-            for ms in line.math_spans[idx]:
+            group = line.math_spans[idx]
+            # Pre-process: identify fraction components (stacked spans)
+            # by checking for spans that overlap in x but differ in y
+            stacked = set()  # indices of spans that are fraction parts
+            for gi in range(len(group)):
+                for gj in range(gi + 1, len(group)):
+                    s1, s2 = group[gi], group[gj]
+                    x_overlap = min(s1.bbox[2], s2.bbox[2]) - max(s1.bbox[0], s2.bbox[0])
+                    if x_overlap > 0 and abs(s1.origin[1] - s2.origin[1]) > 3:
+                        stacked.add(gi)
+                        stacked.add(gj)
+
+            # Render: stacked spans at same x, sequential spans advance x
+            frac_x_start = None
+            frac_max_width = 0
+            for gi, ms in enumerate(group):
                 math_rect = pymupdf.Rect(ms.bbox)
                 if math_rect.is_empty or math_rect.width < 0.5:
                     continue
-                rendered = _render_math_span(page, orig_page, ms, x, baseline_y)
-                x += rendered
+                if gi in stacked:
+                    if frac_x_start is None:
+                        frac_x_start = x
+                    rendered = _render_math_span(page, orig_page, ms, frac_x_start, baseline_y)
+                    frac_max_width = max(frac_max_width, rendered)
+                else:
+                    # Flush any pending fraction width
+                    if frac_x_start is not None:
+                        x = frac_x_start + frac_max_width
+                        frac_x_start = None
+                        frac_max_width = 0
+                    rendered = _render_math_span(page, orig_page, ms, x, baseline_y)
+                    x += rendered
+            # Flush final fraction
+            if frac_x_start is not None:
+                x = frac_x_start + frac_max_width
+            # Draw fraction bars
+            if stacked and frac_x_start is not None:
+                _draw_fraction_bars(page, group, stacked,
+                                    frac_x_start, frac_x_start + frac_max_width,
+                                    baseline_y)
         else:
             if not text:
                 continue
@@ -989,6 +1049,29 @@ def _map_math_text(text: str, font_prefix: str) -> str:
     return text
 
 
+def _copy_original_glyph(page, orig_page, ms: Span, x: float,
+                         baseline_y: float) -> float:
+    """Copy a glyph from the original page to preserve its exact appearance.
+
+    Used for fonts like rsfs and EUFM where pymupdf can't render the Unicode
+    equivalents via insert_text (supplementary plane limitation).
+    """
+    src_rect = pymupdf.Rect(ms.bbox)
+    if src_rect.is_empty or src_rect.width < 0.5:
+        return 0
+
+    # Calculate destination rectangle preserving size
+    y_offset = ms.bbox[1] - baseline_y
+    dst_rect = pymupdf.Rect(
+        x, baseline_y + y_offset,
+        x + src_rect.width, baseline_y + y_offset + src_rect.height,
+    )
+
+    # Copy from original page
+    page.show_pdf_page(dst_rect, orig_page.parent, orig_page.number, clip=src_rect)
+    return src_rect.width
+
+
 def _render_math_span(page, orig_page, ms: Span, x: float,
                       baseline_y: float) -> float:
     """Render a single math span as vector text, returning width consumed."""
@@ -998,6 +1081,11 @@ def _render_math_span(page, orig_page, ms: Span, x: float,
     if style is None:
         # Unknown font - use original bbox width as spacing
         return pymupdf.Rect(ms.bbox).width
+
+    # For rsfs (script) and EUFM (fraktur) fonts, copy the original glyph
+    # because pymupdf can't render supplementary plane Unicode via insert_text
+    if prefix in ("rsfs", "EUFM") and ms.text.strip():
+        return _copy_original_glyph(page, orig_page, ms, x, baseline_y)
 
     # Determine font to use
     if style == "math":
@@ -1024,6 +1112,30 @@ def _render_math_span(page, orig_page, ms: Span, x: float,
         color=(0, 0, 0),
     )
     return m_font_obj.text_length(text, fontsize=ms.size)
+
+
+def _draw_fraction_bars(page, group: list, stacked: set,
+                        frac_x_start: float, frac_x_end: float,
+                        baseline_y: float):
+    """Draw fraction bars for stacked spans within a math group."""
+    if not stacked:
+        return
+    stacked_spans = [group[i] for i in sorted(stacked)]
+    if len(stacked_spans) < 2:
+        return
+    stacked_spans.sort(key=lambda s: s.bbox[1])
+    upper = stacked_spans[0]
+    lower = stacked_spans[-1]
+    # Bar y: midpoint between bottom of upper and top of lower, offset from baseline
+    bar_y_orig = (upper.bbox[3] + lower.bbox[1]) / 2
+    bar_y = baseline_y + (bar_y_orig - baseline_y)
+    shape = page.new_shape()
+    shape.draw_line(
+        pymupdf.Point(frac_x_start, bar_y),
+        pymupdf.Point(frac_x_end, bar_y),
+    )
+    shape.finish(color=(0, 0, 0), width=0.4)
+    shape.commit()
 
 
 def _render_toc_dots(page, x_after_text: float, baseline_y: float,
