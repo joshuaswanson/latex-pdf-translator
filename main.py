@@ -253,7 +253,7 @@ class TranslatableLine:
 
 # -- Extraction -------------------------------------------------------------
 
-def _merge_same_y_lines(lines, max_x_gap=20):
+def _merge_same_y_lines(lines, max_x_gap=8):
     """Merge raw PDF lines that are on the same visual line (y-ranges overlap).
 
     This handles cases like d/dx fractions where the numerator, denominator,
@@ -301,6 +301,15 @@ def _merge_same_y_lines(lines, max_x_gap=20):
         for cluster in x_clusters:
             if len(cluster) == 1:
                 result.append(cluster[0])
+                continue
+
+            # Only merge if cluster is small and has translatable text
+            has_text = any(
+                any(p in s["font"] for p in ("SFRM", "SFBX", "SFBI", "SFTI"))
+                for line in cluster for s in line["spans"]
+            )
+            if len(cluster) > 4 or not has_text:
+                result.extend(cluster)
             else:
                 # Merge: combine spans sorted by x, union bboxes
                 merged_spans = []
@@ -1108,15 +1117,22 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
                 continue
             group = line.math_spans[idx]
             # Pre-process: identify fraction components (stacked spans)
-            # by checking for spans that overlap in x but differ in y
+            # by checking for spans that overlap in x but differ in y.
+            # Require x-centers to be close (fractions are centered) to avoid
+            # false positives on subscript/superscript pairs.
             stacked = set()  # indices of spans that are fraction parts
             for gi in range(len(group)):
                 for gj in range(gi + 1, len(group)):
                     s1, s2 = group[gi], group[gj]
                     x_overlap = min(s1.bbox[2], s2.bbox[2]) - max(s1.bbox[0], s2.bbox[0])
                     if x_overlap > 0 and abs(s1.origin[1] - s2.origin[1]) > 3:
-                        stacked.add(gi)
-                        stacked.add(gj)
+                        # Check x-centers are aligned (fraction, not sub/superscript)
+                        c1 = (s1.bbox[0] + s1.bbox[2]) / 2
+                        c2 = (s2.bbox[0] + s2.bbox[2]) / 2
+                        min_w = min(s1.bbox[2] - s1.bbox[0], s2.bbox[2] - s2.bbox[0])
+                        if abs(c1 - c2) < max(min_w * 0.7, 2.0):
+                            stacked.add(gi)
+                            stacked.add(gj)
 
             # Render: stacked spans at same x, sequential spans advance x
             frac_x_start = None
@@ -1133,19 +1149,22 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
                 else:
                     # Flush any pending fraction width
                     if frac_x_start is not None:
-                        x = frac_x_start + frac_max_width
+                        _draw_fraction_bars(page, group, stacked,
+                                            frac_x_start,
+                                            frac_x_start + frac_max_width,
+                                            baseline_y)
+                        x = frac_x_start + frac_max_width + 1.5
                         frac_x_start = None
                         frac_max_width = 0
                     rendered = _render_math_span(page, orig_page, ms, x, baseline_y)
                     x += rendered
-            # Flush final fraction
+            # Flush final fraction (if stacked spans are at end of group)
             if frac_x_start is not None:
-                x = frac_x_start + frac_max_width + 1.5  # margin after fraction
-            # Draw fraction bars
-            if stacked and frac_x_start is not None:
                 _draw_fraction_bars(page, group, stacked,
-                                    frac_x_start, frac_x_start + frac_max_width,
+                                    frac_x_start,
+                                    frac_x_start + frac_max_width,
                                     baseline_y)
+                x = frac_x_start + frac_max_width + 1.5
         else:
             if not text:
                 continue
@@ -1214,17 +1233,19 @@ def _copy_original_glyph(page, orig_page, ms: Span, x: float,
         return 0
 
     # Add padding to avoid clipping glyph edges (especially cursive ascenders)
-    pad = 1.0
+    pad_x = 1.5
+    pad_top = 2.5  # extra for ascenders/flourishes
+    pad_bot = 1.5
     src_rect = pymupdf.Rect(
-        orig_rect.x0 - pad, orig_rect.y0 - pad,
-        orig_rect.x1 + pad, orig_rect.y1 + pad,
+        orig_rect.x0 - pad_x, orig_rect.y0 - pad_top,
+        orig_rect.x1 + pad_x, orig_rect.y1 + pad_bot,
     )
 
     # Calculate destination rectangle preserving size (with matching padding)
     y_offset = ms.bbox[1] - baseline_y
     dst_rect = pymupdf.Rect(
-        x - pad, baseline_y + y_offset - pad,
-        x + orig_rect.width + pad, baseline_y + y_offset + orig_rect.height + pad,
+        x - pad_x, baseline_y + y_offset - pad_top,
+        x + orig_rect.width + pad_x, baseline_y + y_offset + orig_rect.height + pad_bot,
     )
 
     # Copy from original page
