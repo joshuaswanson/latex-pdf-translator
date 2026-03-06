@@ -1,0 +1,10 @@
+[project]
+name = "latex-pdf-translator"
+version = "0.1.0"
+description = "Translate French math LaTeX PDFs to English while preserving mathematical notation"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "pymupdf>=1.27.1",
+    "deep-translator>=1.11.0",
+]

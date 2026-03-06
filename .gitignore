@@ -1,0 +1,24 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Translation cache and output
+*.cache.json
+*-en.pdf
+
+# Input PDFs (user-specific)
+fonctionsdunevariable.pdf
+
+# Misc
+sfrm1000.pfa
+*.pfa
+
+# Claude
+.claude/
