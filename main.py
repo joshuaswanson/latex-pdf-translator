@@ -142,7 +142,7 @@ BATCH_CHARS = 4800
 
 # Math placeholder format: XXXM0XXX, XXXM1XXX, etc.
 # Google Translate preserves these as opaque tokens
-MATH_MARKER_RE = re.compile(r'XXXM(\d+)XXX')
+MATH_MARKER_RE = re.compile(r'XXXM(\d+)XXX', re.IGNORECASE)
 
 # Post-translation terminology fixes (applied after {M0} markers restored)
 TERM_FIXES = {
@@ -253,6 +253,72 @@ class TranslatableLine:
 
 # -- Extraction -------------------------------------------------------------
 
+def _merge_same_y_lines(lines, max_x_gap=20):
+    """Merge raw PDF lines that are on the same visual line (y-ranges overlap).
+
+    This handles cases like d/dx fractions where the numerator, denominator,
+    and surrounding text are separate PDF "lines" at the same y level.
+    Without merging, translated text can overflow into adjacent line areas.
+    Only merges lines that are also close in x (gap < max_x_gap points).
+    """
+    if len(lines) <= 1:
+        return lines
+
+    # Group lines by overlapping y-ranges
+    y_groups = []
+    for line in lines:
+        placed = False
+        for group in y_groups:
+            ref = group[0]["bbox"]
+            ly0, ly1 = line["bbox"][1], line["bbox"][3]
+            gy0, gy1 = ref[1], ref[3]
+            y_overlap = min(ly1, gy1) - max(ly0, gy0)
+            min_height = min(ly1 - ly0, gy1 - gy0)
+            if min_height > 0 and y_overlap / min_height >= 0.5:
+                group.append(line)
+                placed = True
+                break
+        if not placed:
+            y_groups.append([line])
+
+    result = []
+    for y_group in y_groups:
+        if len(y_group) == 1:
+            result.append(y_group[0])
+            continue
+
+        # Within each y-group, cluster by x-proximity
+        y_group.sort(key=lambda l: l["bbox"][0])
+        x_clusters = [[y_group[0]]]
+        for line in y_group[1:]:
+            prev_x1 = x_clusters[-1][-1]["bbox"][2]
+            curr_x0 = line["bbox"][0]
+            if curr_x0 - prev_x1 < max_x_gap:
+                x_clusters[-1].append(line)
+            else:
+                x_clusters.append([line])
+
+        for cluster in x_clusters:
+            if len(cluster) == 1:
+                result.append(cluster[0])
+            else:
+                # Merge: combine spans sorted by x, union bboxes
+                merged_spans = []
+                for line in cluster:
+                    merged_spans.extend(line["spans"])
+                merged_spans.sort(key=lambda s: s["bbox"][0])
+                all_bboxes = [l["bbox"] for l in cluster]
+                merged_bbox = [
+                    min(b[0] for b in all_bboxes),
+                    min(b[1] for b in all_bboxes),
+                    max(b[2] for b in all_bboxes),
+                    max(b[3] for b in all_bboxes),
+                ]
+                result.append({"spans": merged_spans, "bbox": merged_bbox})
+
+    return result
+
+
 def extract_lines(doc) -> list[TranslatableLine]:
     """Extract all lines containing translatable French text."""
     result = []
@@ -288,7 +354,10 @@ def extract_lines(doc) -> list[TranslatableLine]:
             math_only_lines = []  # [(bbox, [Span, ...]), ...] for fraction numerators etc.
             block_lines_start = len(result)  # track where this block's lines start
 
-            for line_data in block["lines"]:
+            # Merge lines at the same y-level (e.g. fraction parts + surrounding text)
+            merged_block_lines = _merge_same_y_lines(block["lines"])
+
+            for line_data in merged_block_lines:
                 spans = []
                 for s in line_data["spans"]:
                     spans.append(Span(
@@ -771,8 +840,9 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
     # Track rendered text extents for link rectangle adjustment
     rendered_extents = {}  # (page_idx, round(y_mid)) -> (x0, text_end_x)
 
-    # Collect link annotation colors from ALL pages before any redaction
+    # Collect link annotation colors and text from ALL pages before any redaction
     all_annot_colors = {}  # (page_idx, round_x0, round_y0) -> (r, g, b)
+    all_link_texts = {}  # (page_idx, round_x0, round_y0) -> text under link
     for page_idx in range(len(work_doc)):
         page = work_doc[page_idx]
         for link in page.get_links():
@@ -787,6 +857,10 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
                 all_annot_colors[key] = (float(m.group(1)), float(m.group(2)), float(m.group(3)))
             else:
                 all_annot_colors[key] = (1, 0, 0)  # default red
+            # Collect text under link for search-based repositioning
+            link_text = page.get_text("text", clip=link["from"]).strip()
+            if link_text:
+                all_link_texts[key] = link_text
 
     changed = 0
     for page_idx in sorted(page_lines):
@@ -837,7 +911,7 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
             changed += 1
 
     print(f"  {changed} lines modified")
-    return all_annot_colors, rendered_extents
+    return all_annot_colors, rendered_extents, all_link_texts
 
 
 def _get_whiteout_rect(page, line: TranslatableLine) -> pymupdf.Rect:
@@ -920,6 +994,84 @@ def _build_style_map(line: TranslatableLine, translated: str) -> list:
     return result
 
 
+def _fix_style_boundaries(segments):
+    """Fix style boundaries to respect bracket groups and label patterns."""
+    # Flatten to character-level, tracking math marker positions
+    chars = []  # [[char, style], ...]
+    items = []  # [("char", idx_in_chars) | ("math", marker_text), ...]
+
+    for text, style in segments:
+        if style == "math":
+            items.append(("math", text))
+        else:
+            for ch in text:
+                items.append(("char", len(chars)))
+                chars.append([ch, style])
+
+    if len(chars) < 2:
+        return segments
+
+    full_text = "".join(ch for ch, _ in chars)
+
+    # Fix 1: Unify style within square brackets [...]
+    for m in re.finditer(r'\[[^\]]*\]', full_text):
+        s, e = m.start(), m.end()
+        styles = {}
+        for k in range(s, min(e, len(chars))):
+            st = chars[k][1]
+            styles[st] = styles.get(st, 0) + 1
+        if styles:
+            dominant = max(styles, key=styles.get)
+            for k in range(s, min(e, len(chars))):
+                chars[k][1] = dominant
+
+    # Fix 2: Extend style through trailing periods/digits at style boundaries
+    # This fixes labels like "I.1.1." where proportional mapping splits mid-label
+    i = 0
+    while i < len(chars) - 1:
+        if chars[i][1] != chars[i + 1][1]:
+            prev_style = chars[i][1]
+            j = i + 1
+            while j < len(chars) and chars[j][0] in '.,;:0123456789':
+                j += 1
+            if j > i + 1:
+                for k in range(i + 1, j):
+                    chars[k][1] = prev_style
+                i = j
+            else:
+                i += 1
+        else:
+            i += 1
+
+    # Rebuild segments from items list
+    result = []
+    current_text = ""
+    current_style = None
+
+    for item_type, item_data in items:
+        if item_type == "math":
+            if current_text:
+                result.append((current_text, current_style))
+                current_text = ""
+                current_style = None
+            result.append((item_data, "math"))
+        else:
+            char_idx = item_data
+            ch, style = chars[char_idx]
+            if style != current_style:
+                if current_text:
+                    result.append((current_text, current_style))
+                current_text = ch
+                current_style = style
+            else:
+                current_text += ch
+
+    if current_text:
+        result.append((current_text, current_style))
+
+    return result
+
+
 def _render_line_content(page, orig_page, line: TranslatableLine,
                          translated: str) -> float:
     """Render translated text + math glyphs onto the page.
@@ -941,6 +1093,7 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
 
     # Build styled segments from translated text
     styled_segments = _build_style_map(line, translated)
+    styled_segments = _fix_style_boundaries(styled_segments)
 
     # Render from left to right
     x = x0
@@ -987,7 +1140,7 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
                     x += rendered
             # Flush final fraction
             if frac_x_start is not None:
-                x = frac_x_start + frac_max_width
+                x = frac_x_start + frac_max_width + 1.5  # margin after fraction
             # Draw fraction bars
             if stacked and frac_x_start is not None:
                 _draw_fraction_bars(page, group, stacked,
@@ -1056,20 +1209,27 @@ def _copy_original_glyph(page, orig_page, ms: Span, x: float,
     Used for fonts like rsfs and EUFM where pymupdf can't render the Unicode
     equivalents via insert_text (supplementary plane limitation).
     """
-    src_rect = pymupdf.Rect(ms.bbox)
-    if src_rect.is_empty or src_rect.width < 0.5:
+    orig_rect = pymupdf.Rect(ms.bbox)
+    if orig_rect.is_empty or orig_rect.width < 0.5:
         return 0
 
-    # Calculate destination rectangle preserving size
+    # Add padding to avoid clipping glyph edges (especially cursive ascenders)
+    pad = 1.0
+    src_rect = pymupdf.Rect(
+        orig_rect.x0 - pad, orig_rect.y0 - pad,
+        orig_rect.x1 + pad, orig_rect.y1 + pad,
+    )
+
+    # Calculate destination rectangle preserving size (with matching padding)
     y_offset = ms.bbox[1] - baseline_y
     dst_rect = pymupdf.Rect(
-        x, baseline_y + y_offset,
-        x + src_rect.width, baseline_y + y_offset + src_rect.height,
+        x - pad, baseline_y + y_offset - pad,
+        x + orig_rect.width + pad, baseline_y + y_offset + orig_rect.height + pad,
     )
 
     # Copy from original page
     page.show_pdf_page(dst_rect, orig_page.parent, orig_page.number, clip=src_rect)
-    return src_rect.width
+    return orig_rect.width
 
 
 def _render_math_span(page, orig_page, ms: Span, x: float,
@@ -1181,7 +1341,26 @@ def _render_toc_dots(page, x_after_text: float, baseline_y: float,
             )
 
 
-def _fix_link_annotations(doc, annot_colors: dict, rendered_extents: dict):
+def _search_link_text(page, text: str, orig_rect) -> pymupdf.Rect | None:
+    """Search for text on the page, returning the best matching rect near orig_rect."""
+    rects = page.search_for(text)
+    if not rects:
+        return None
+    best = None
+    best_dist = float('inf')
+    for r in rects:
+        # Must be on a similar line (y within tolerance)
+        if abs(r.y0 - orig_rect.y0) > 15:
+            continue
+        dist = abs(r.x0 - orig_rect.x0) + abs(r.y0 - orig_rect.y0)
+        if dist < best_dist:
+            best_dist = dist
+            best = r
+    return best
+
+
+def _fix_link_annotations(doc, annot_colors: dict, rendered_extents: dict,
+                          link_texts: dict):
     """Fix link border colors and adjust rectangles to match rendered text."""
     for page_idx in range(len(doc)):
         page = doc[page_idx]
@@ -1218,6 +1397,21 @@ def _fix_link_annotations(doc, annot_colors: dict, rendered_extents: dict):
 
             if orig_width <= 0:
                 continue
+
+            # For inline links, try search-based positioning (precise for citations)
+            key = (page_idx, round(lr.x0, 1), round(lr.y0, 1))
+            orig_text = link_texts.get(key, "")
+
+            if orig_text and abs(lr.x0 - orig_x0) >= 5 and len(orig_text) <= 20:
+                found = _search_link_text(page, orig_text, lr)
+                if found:
+                    adj_x0 = found.x0 - 0.5
+                    adj_x1 = found.x1 + 0.5
+                    pdf_y0 = page_height - lr.y1
+                    pdf_y1 = page_height - lr.y0
+                    doc.xref_set_key(xref, "Rect",
+                                     f"[{adj_x0:.3f} {pdf_y0:.3f} {adj_x1:.3f} {pdf_y1:.3f}]")
+                    continue
 
             # Check if link starts near the line start (TOC-style) or is inline
             if abs(lr.x0 - orig_x0) < 5:
@@ -1279,7 +1473,7 @@ def main():
 
     # Step 3: Render
     print("\nRendering translations...")
-    annot_colors, rendered_extents = render_all(work_doc, orig_doc, lines, translations)
+    annot_colors, rendered_extents, link_texts = render_all(work_doc, orig_doc, lines, translations)
 
     # Save to bytes, reload, and fix link border colors
     # (insert_link creates links with xref=0; need save/reload to get real xrefs)
@@ -1288,7 +1482,7 @@ def main():
     orig_doc.close()
 
     doc = pymupdf.open("pdf", pdf_bytes)
-    _fix_link_annotations(doc, annot_colors, rendered_extents)
+    _fix_link_annotations(doc, annot_colors, rendered_extents, link_texts)
     doc.save(output_path, garbage=4, deflate=True)
     doc.close()
     print(f"\nSaved: {output_path}")
