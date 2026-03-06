@@ -73,8 +73,24 @@ MATH_FONT_STYLE = {
 # CMEX control characters -> Unicode equivalents
 CMEX_CHAR_MAP = {
     "\x00": "(", "\x01": ")", "\x02": "[", "\x03": "]",
+    "\x04": "\u230A", "\x05": "\u230B",  # floor brackets
+    "\x06": "\u2308", "\x07": "\u2309",  # ceiling brackets
+    "\x08": "{", "\x09": "}",
+    "\x0A": "\u27E8", "\x0B": "\u27E9",  # angle brackets
+    "\x0C": "|",
     "\x10": "\u239B", "\x11": "\u239D",  # left paren top/bottom
     "\x12": "\u239E", "\x13": "\u23A0",  # right paren top/bottom
+    "(": "(", " ": " ",
+    "P": "\u2211",  # summation (text size)
+    "Q": "\u220F",  # product (text size)
+    "R": "\u222B",  # integral (text size)
+    "X": "\u2211",  # summation (display size)
+    "Y": "\u220F",  # product (display size)
+    "Z": "\u222B",  # integral (display size)
+    "\uf8f1": "\u23A7",  # left curly brace upper
+    "\uf8f2": "\u23A8",  # left curly brace middle
+    "\uf8f3": "\u23A9",  # left curly brace lower
+    "\uf8f4": "\u23AB",  # right curly brace upper
 }
 
 # rsfs script letter mapping (rsfs extracts as plain letters, need Unicode script)
@@ -1266,6 +1282,10 @@ def _render_math_span(page, orig_page, ms: Span, x: float,
     # For rsfs (script) and EUFM (fraktur) fonts, copy the original glyph
     # because pymupdf can't render supplementary plane Unicode via insert_text
     if prefix in ("rsfs", "EUFM") and ms.text.strip():
+        return _copy_original_glyph(page, orig_page, ms, x, baseline_y)
+
+    # For CMEX characters not in the mapping, copy from original
+    if prefix == "CMEX" and any(ch not in CMEX_CHAR_MAP for ch in ms.text if ch.strip()):
         return _copy_original_glyph(page, orig_page, ms, x, baseline_y)
 
     # Determine font to use
