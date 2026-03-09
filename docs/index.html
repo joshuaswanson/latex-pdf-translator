@@ -1,0 +1,841 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LaTeX PDF Translator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600&family=JetBrains+Mono:wght@400;500&family=Source+Sans+3:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      :root {
+        --cream: #f6f1eb;
+        --warm-white: #faf8f5;
+        --ink: #1a1614;
+        --ink-light: #3d3632;
+        --ink-faint: #8a7e76;
+        --accent: #b8432f;
+        --accent-soft: #d4694e;
+        --rule: #d4cdc5;
+        --rule-light: #e8e2db;
+        --paper-shadow: rgba(26, 22, 20, 0.06);
+        --serif: "Cormorant Garamond", "Georgia", serif;
+        --sans: "Source Sans 3", "Helvetica Neue", sans-serif;
+        --mono: "JetBrains Mono", "Menlo", monospace;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        font-family: var(--sans);
+        background: var(--cream);
+        color: var(--ink);
+        line-height: 1.6;
+        overflow-x: hidden;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* --- Grain overlay --- */
+      body::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.025;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+        z-index: 9999;
+      }
+
+      /* --- Layout --- */
+      .container {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 0 2rem;
+      }
+
+      /* --- Header --- */
+      header {
+        padding: 4rem 0 3rem;
+        text-align: center;
+        position: relative;
+      }
+
+      .header-rule {
+        width: 60px;
+        height: 1.5px;
+        background: var(--accent);
+        margin: 0 auto 2rem;
+      }
+
+      header h1 {
+        font-family: var(--serif);
+        font-weight: 700;
+        font-size: clamp(2.4rem, 5vw, 3.6rem);
+        letter-spacing: -0.02em;
+        line-height: 1.15;
+        margin-bottom: 0.6rem;
+        color: var(--ink);
+      }
+
+      header h1 span {
+        color: var(--accent);
+      }
+
+      .subtitle {
+        font-family: var(--serif);
+        font-size: 1.25rem;
+        font-weight: 400;
+        font-style: italic;
+        color: var(--ink-faint);
+        max-width: 500px;
+        margin: 0 auto;
+        line-height: 1.5;
+      }
+
+      /* --- Decorative math float --- */
+      .math-float {
+        position: absolute;
+        font-family: var(--serif);
+        font-style: italic;
+        color: var(--rule);
+        pointer-events: none;
+        user-select: none;
+        font-size: 1.1rem;
+      }
+
+      .math-float.left {
+        left: -1rem;
+        top: 3rem;
+        transform: rotate(-8deg);
+        font-size: 0.95rem;
+      }
+      .math-float.right {
+        right: -0.5rem;
+        top: 5rem;
+        transform: rotate(5deg);
+      }
+
+      /* --- Nav pills --- */
+      nav {
+        display: flex;
+        justify-content: center;
+        gap: 0.25rem;
+        margin: 2.5rem 0 3rem;
+        padding: 0.25rem;
+        background: var(--rule-light);
+        border-radius: 8px;
+        width: fit-content;
+        margin-left: auto;
+        margin-right: auto;
+      }
+
+      nav a {
+        font-family: var(--sans);
+        font-size: 0.82rem;
+        font-weight: 500;
+        text-decoration: none;
+        color: var(--ink-faint);
+        padding: 0.5rem 1.1rem;
+        border-radius: 6px;
+        transition: all 0.2s ease;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+
+      nav a:hover {
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.5);
+      }
+      nav a.active {
+        color: var(--ink);
+        background: var(--warm-white);
+        box-shadow: 0 1px 3px var(--paper-shadow);
+      }
+
+      /* --- Sections --- */
+      section {
+        margin-bottom: 4rem;
+      }
+
+      .section-label {
+        font-family: var(--mono);
+        font-size: 0.7rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        color: var(--accent);
+        margin-bottom: 0.75rem;
+      }
+
+      section h2 {
+        font-family: var(--serif);
+        font-size: 1.9rem;
+        font-weight: 600;
+        margin-bottom: 1rem;
+        letter-spacing: -0.01em;
+      }
+
+      section p {
+        color: var(--ink-light);
+        font-size: 0.95rem;
+        line-height: 1.75;
+        max-width: 640px;
+      }
+
+      /* --- Pipeline steps --- */
+      .pipeline {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0;
+        margin-top: 2rem;
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--warm-white);
+      }
+
+      .step {
+        padding: 1.5rem 1.8rem;
+        display: grid;
+        grid-template-columns: 3.5rem 1fr;
+        gap: 1rem;
+        align-items: start;
+        border-bottom: 1px solid var(--rule-light);
+        transition: background 0.25s ease;
+      }
+
+      .step:last-child {
+        border-bottom: none;
+      }
+      .step:hover {
+        background: rgba(184, 67, 47, 0.02);
+      }
+
+      .step-num {
+        font-family: var(--serif);
+        font-size: 2rem;
+        font-weight: 700;
+        color: var(--accent);
+        opacity: 0.4;
+        line-height: 1;
+        padding-top: 0.15rem;
+      }
+
+      .step h3 {
+        font-family: var(--serif);
+        font-size: 1.15rem;
+        font-weight: 600;
+        margin-bottom: 0.3rem;
+      }
+
+      .step p {
+        font-size: 0.88rem;
+        color: var(--ink-faint);
+        line-height: 1.6;
+        max-width: none;
+      }
+
+      .step code {
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        background: var(--cream);
+        padding: 0.15em 0.4em;
+        border-radius: 3px;
+        color: var(--ink-light);
+      }
+
+      /* --- Upload zone --- */
+      .upload-area {
+        margin-top: 2rem;
+        position: relative;
+      }
+
+      .drop-zone {
+        border: 2px dashed var(--rule);
+        border-radius: 12px;
+        padding: 3.5rem 2rem;
+        text-align: center;
+        background: var(--warm-white);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .drop-zone::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(
+          circle at 50% 50%,
+          rgba(184, 67, 47, 0.03),
+          transparent 70%
+        );
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+
+      .drop-zone:hover {
+        border-color: var(--accent-soft);
+      }
+      .drop-zone:hover::before {
+        opacity: 1;
+      }
+      .drop-zone.drag-over {
+        border-color: var(--accent);
+        background: rgba(184, 67, 47, 0.03);
+        transform: scale(1.005);
+      }
+
+      .drop-icon {
+        width: 48px;
+        height: 48px;
+        margin: 0 auto 1rem;
+        opacity: 0.35;
+      }
+
+      .drop-zone h3 {
+        font-family: var(--serif);
+        font-size: 1.3rem;
+        font-weight: 600;
+        margin-bottom: 0.4rem;
+      }
+
+      .drop-zone p {
+        font-size: 0.85rem;
+        color: var(--ink-faint);
+        max-width: none;
+        margin: 0 auto;
+      }
+
+      .drop-zone .browse {
+        color: var(--accent);
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        cursor: pointer;
+      }
+
+      .file-types {
+        margin-top: 1rem;
+        font-family: var(--mono);
+        font-size: 0.7rem;
+        color: var(--rule);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .upload-note {
+        margin-top: 1.25rem;
+        padding: 1rem 1.25rem;
+        background: var(--warm-white);
+        border-left: 2.5px solid var(--accent);
+        border-radius: 0 6px 6px 0;
+        font-size: 0.82rem;
+        color: var(--ink-faint);
+        line-height: 1.6;
+      }
+
+      .upload-note strong {
+        color: var(--ink-light);
+        font-weight: 600;
+      }
+
+      /* --- Features --- */
+      .features-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1px;
+        margin-top: 2rem;
+        background: var(--rule-light);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        overflow: hidden;
+      }
+
+      .feature {
+        padding: 1.5rem;
+        background: var(--warm-white);
+        transition: background 0.2s ease;
+      }
+
+      .feature:hover {
+        background: #fdfcfa;
+      }
+
+      .feature-icon {
+        font-size: 1.2rem;
+        margin-bottom: 0.6rem;
+        opacity: 0.7;
+      }
+
+      .feature h4 {
+        font-family: var(--serif);
+        font-size: 1rem;
+        font-weight: 600;
+        margin-bottom: 0.3rem;
+      }
+
+      .feature p {
+        font-size: 0.8rem;
+        color: var(--ink-faint);
+        line-height: 1.55;
+        max-width: none;
+      }
+
+      /* --- CLI section --- */
+      .cli-block {
+        margin-top: 1.5rem;
+        background: var(--ink);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 8px 32px rgba(26, 22, 20, 0.15);
+      }
+
+      .cli-bar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0.75rem 1rem;
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .cli-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      .cli-dot:nth-child(1) {
+        background: #ff5f57;
+      }
+      .cli-dot:nth-child(2) {
+        background: #ffbd2e;
+      }
+      .cli-dot:nth-child(3) {
+        background: #28c840;
+      }
+
+      .cli-body {
+        padding: 1.25rem 1.5rem;
+        font-family: var(--mono);
+        font-size: 0.82rem;
+        line-height: 1.8;
+        color: #c7bfb6;
+      }
+
+      .cli-body .prompt {
+        color: var(--accent-soft);
+      }
+      .cli-body .cmd {
+        color: #e8e2db;
+      }
+      .cli-body .comment {
+        color: #605750;
+        font-style: italic;
+      }
+      .cli-body .output {
+        color: #8a7e76;
+      }
+
+      /* --- Footer --- */
+      footer {
+        padding: 3rem 0;
+        text-align: center;
+        border-top: 1px solid var(--rule-light);
+      }
+
+      footer p {
+        font-size: 0.8rem;
+        color: var(--ink-faint);
+        margin: 0 auto;
+      }
+
+      footer a {
+        color: var(--accent);
+        text-decoration: none;
+        border-bottom: 1px solid transparent;
+        transition: border-color 0.2s;
+      }
+
+      footer a:hover {
+        border-bottom-color: var(--accent);
+      }
+
+      /* --- Animations --- */
+      .fade-in {
+        opacity: 0;
+        transform: translateY(16px);
+        animation: fadeUp 0.6s ease forwards;
+      }
+
+      @keyframes fadeUp {
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .fade-in:nth-child(1) {
+        animation-delay: 0.05s;
+      }
+      .fade-in:nth-child(2) {
+        animation-delay: 0.12s;
+      }
+      .fade-in:nth-child(3) {
+        animation-delay: 0.19s;
+      }
+      .fade-in:nth-child(4) {
+        animation-delay: 0.26s;
+      }
+      .fade-in:nth-child(5) {
+        animation-delay: 0.33s;
+      }
+
+      /* --- Responsive --- */
+      @media (max-width: 640px) {
+        .container {
+          padding: 0 1.25rem;
+        }
+        header {
+          padding: 3rem 0 2rem;
+        }
+        .features-grid {
+          grid-template-columns: 1fr;
+        }
+        .step {
+          grid-template-columns: 2.5rem 1fr;
+          padding: 1.2rem;
+        }
+        .math-float {
+          display: none;
+        }
+        nav {
+          flex-wrap: wrap;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header class="fade-in">
+        <span class="math-float left"
+          >&sum;<sub>n=0</sub><sup>&infin;</sup></span
+        >
+        <span class="math-float right">&part;f/&part;x</span>
+        <div class="header-rule"></div>
+        <h1>LaTeX PDF <span>Translator</span></h1>
+        <p class="subtitle">
+          Translate French mathematical PDFs to English, preserving every symbol
+          as crisp vector text.
+        </p>
+      </header>
+
+      <nav class="fade-in">
+        <a href="#how" class="active">How it works</a>
+        <a href="#translate">Translate</a>
+        <a href="#features">Features</a>
+        <a href="#cli">CLI</a>
+      </nav>
+
+      <!-- How it works -->
+      <section id="how" class="fade-in">
+        <div class="section-label">Pipeline</div>
+        <h2>Three steps, zero quality loss</h2>
+        <p>
+          The translator operates directly on PDF internals -- no OCR, no
+          rasterization. Mathematical notation passes through untouched.
+        </p>
+
+        <div class="pipeline">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div>
+              <h3>Extract</h3>
+              <p>
+                Parse every text span in the PDF. Classify each as translatable
+                text (<code>SFRM</code>, <code>SFBX</code>,
+                <code>SFTI</code> fonts) or math notation (<code>CMMI</code>,
+                <code>CMSY</code>, <code>CMEX</code>, etc.) to be preserved
+                exactly.
+              </p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div>
+              <h3>Translate</h3>
+              <p>
+                Send text to Google Translate with opaque
+                <code>XXXM0XXX</code> markers standing in for math spans. Google
+                preserves these tokens, and the translator restores them after
+                translation.
+              </p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div>
+              <h3>Render</h3>
+              <p>
+                Redact original text from the PDF, then re-render using CMU
+                Serif for text and Latin Modern Math for symbols -- all as real
+                vector glyphs with proper Unicode math code points.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Translate -->
+      <section id="translate" class="fade-in">
+        <div class="section-label">Translate</div>
+        <h2>Try it</h2>
+        <p>
+          Upload a French math PDF and get back an English version with all
+          notation intact.
+        </p>
+
+        <div class="upload-area">
+          <div class="drop-zone" id="dropZone">
+            <svg
+              class="drop-icon"
+              viewBox="0 0 48 48"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M24 32V12M24 12l-8 8M24 12l8 8" />
+              <path d="M8 36v2a4 4 0 004 4h24a4 4 0 004-4v-2" />
+            </svg>
+            <h3>Drop your PDF here</h3>
+            <p>or <span class="browse" id="browseBtn">browse files</span></p>
+            <div class="file-types">.pdf only</div>
+            <input type="file" id="fileInput" accept=".pdf" hidden />
+          </div>
+
+          <div class="upload-note">
+            <strong>Note:</strong> Client-side translation is not yet available.
+            For now, use the <a href="#cli">command-line tool</a> to translate
+            your PDFs locally. This interface is coming soon.
+          </div>
+        </div>
+      </section>
+
+      <!-- Features -->
+      <section id="features" class="fade-in">
+        <div class="section-label">Details</div>
+        <h2>What makes it different</h2>
+
+        <div class="features-grid">
+          <div class="feature">
+            <div class="feature-icon">&int;</div>
+            <h4>Vector math symbols</h4>
+            <p>
+              All math notation rendered as real vector text using Latin Modern
+              Math -- never rasterized images.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">&xi;</div>
+            <h4>Proper math italics</h4>
+            <p>
+              Variables use Unicode Mathematical Italic code points for correct
+              typographic rendering.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">&para;</div>
+            <h4>Paragraph-level translation</h4>
+            <p>
+              Pure-text blocks are merged into paragraphs before translation for
+              more natural output.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">&middot;&middot;&middot;</div>
+            <h4>TOC preservation</h4>
+            <p>
+              Table of contents dot leaders, page numbers, and hyperlink
+              annotations are regenerated correctly.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">B</div>
+            <h4>Style preservation</h4>
+            <p>
+              Bold, italic, and bold-italic text styles are detected and
+              preserved through translation.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">&harr;</div>
+            <h4>Translation cache</h4>
+            <p>
+              Results are cached to disk. Re-running on the same PDF skips
+              already-translated lines instantly.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- CLI -->
+      <section id="cli" class="fade-in">
+        <div class="section-label">Installation</div>
+        <h2>Command line</h2>
+        <p>
+          Clone the repo and run with
+          <code
+            style="
+              font-family: var(--mono);
+              font-size: 0.85rem;
+              background: var(--cream);
+              padding: 0.15em 0.4em;
+              border-radius: 3px;
+            "
+            >uv</code
+          >. No configuration needed.
+        </p>
+
+        <div class="cli-block">
+          <div class="cli-bar">
+            <div class="cli-dot"></div>
+            <div class="cli-dot"></div>
+            <div class="cli-dot"></div>
+          </div>
+          <div class="cli-body">
+            <span class="comment"># Clone and install</span><br />
+            <span class="prompt">$</span>
+            <span class="cmd"
+              >git clone
+              https://github.com/joshuaswanson/latex-pdf-translator</span
+            ><br />
+            <span class="prompt">$</span>
+            <span class="cmd">cd latex-pdf-translator</span><br />
+            <br />
+            <span class="comment"># Translate a PDF</span><br />
+            <span class="prompt">$</span>
+            <span class="cmd">uv run main.py lecture-notes.pdf</span><br />
+            <br />
+            <span class="output">Extracting translatable lines...</span><br />
+            <span class="output"
+              >Found 847 translatable lines across 54 pages</span
+            ><br />
+            <span class="output">Translating via Google Translate...</span
+            ><br />
+            <span class="output">&nbsp; 312 cached, 535 to translate</span
+            ><br />
+            <span class="output">Rendering translations...</span><br />
+            <span class="output">Saved: lecture-notes-en.pdf</span>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        <p>
+          Built by
+          <a href="https://github.com/joshuaswanson">Joshua Swanson</a> &middot;
+          <a href="https://github.com/joshuaswanson/latex-pdf-translator"
+            >Source on GitHub</a
+          >
+        </p>
+      </footer>
+    </div>
+
+    <script>
+      // Nav active state
+      const navLinks = document.querySelectorAll("nav a");
+      const sections = document.querySelectorAll("section");
+
+      function updateNav() {
+        let current = "";
+        sections.forEach((s) => {
+          if (window.scrollY >= s.offsetTop - 200) current = s.id;
+        });
+        navLinks.forEach((a) => {
+          a.classList.toggle(
+            "active",
+            a.getAttribute("href") === "#" + current,
+          );
+        });
+      }
+      window.addEventListener("scroll", updateNav, { passive: true });
+
+      // Drop zone interactions
+      const dropZone = document.getElementById("dropZone");
+      const fileInput = document.getElementById("fileInput");
+      const browseBtn = document.getElementById("browseBtn");
+
+      browseBtn.addEventListener("click", () => fileInput.click());
+
+      ["dragenter", "dragover"].forEach((evt) => {
+        dropZone.addEventListener(evt, (e) => {
+          e.preventDefault();
+          dropZone.classList.add("drag-over");
+        });
+      });
+
+      ["dragleave", "drop"].forEach((evt) => {
+        dropZone.addEventListener(evt, (e) => {
+          e.preventDefault();
+          dropZone.classList.remove("drag-over");
+        });
+      });
+
+      dropZone.addEventListener("drop", (e) => {
+        const file = e.dataTransfer.files[0];
+        if (file && file.type === "application/pdf") handleFile(file);
+      });
+
+      fileInput.addEventListener("change", () => {
+        if (fileInput.files[0]) handleFile(fileInput.files[0]);
+      });
+
+      function handleFile(file) {
+        dropZone.querySelector("h3").textContent = file.name;
+        dropZone.querySelector("p").textContent = formatSize(file.size);
+        dropZone.querySelector(".file-types").textContent =
+          "Client-side translation coming soon";
+      }
+
+      function formatSize(bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+        return (bytes / 1048576).toFixed(1) + " MB";
+      }
+
+      // Scroll-triggered fade-in
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((e) => {
+            if (e.isIntersecting) {
+              e.target.style.animationPlayState = "running";
+              observer.unobserve(e.target);
+            }
+          });
+        },
+        { threshold: 0.1 },
+      );
+
+      document.querySelectorAll(".fade-in").forEach((el) => {
+        el.style.animationPlayState = "paused";
+        observer.observe(el);
+      });
+    </script>
+  </body>
+</html>
