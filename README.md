@@ -1,6 +1,6 @@
 # latex-pdf-translator
 
-Translate French math LaTeX PDFs to English while preserving all mathematical notation as crisp vector text.
+Translate math LaTeX PDFs to English from any language while preserving all mathematical notation as crisp vector text.
 
 ## How it works
 
@@ -17,16 +17,18 @@ Key features:
 - Hyperlink annotations preserved
 - Translation cache for fast re-runs
 - Paragraph-level translation for pure-text blocks
+- Any source language supported by Google Translate
 
 **[Try it online](https://joshuaswanson.github.io/latex-pdf-translator/)** | [Source on GitHub](https://github.com/joshuaswanson/latex-pdf-translator) | [Buy me a coffee](https://buymeacoffee.com/swanson)
 
 ## Usage
 
 ```bash
-uv run main.py path/to/french-math.pdf  # translate any French math PDF
+uv run main.py path/to/math.pdf                        # French to English (default)
+uv run main.py path/to/math.pdf --source de --target es # German to Spanish
 ```
 
-Output is saved as `<input>-en.pdf`. A `.cache.json` file is created alongside for fast re-runs.
+Output is saved as `<input>-<target>.pdf`. A `.cache.json` file is created alongside for fast re-runs.
 
 ## Dependencies
 
@@ -51,4 +53,4 @@ The following fonts are included (all open source):
 
 - Line-level translation for math-containing lines (Google Translate can't reorder words around opaque markers perfectly)
 - Some CMEX extensible delimiter fragments use image fallback when Unicode mapping unavailable
-- Assumes French source language (configurable in code)
+- Optimized for LaTeX-generated PDFs with standard Computer Modern fonts
