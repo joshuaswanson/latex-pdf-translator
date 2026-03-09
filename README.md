@@ -18,7 +18,7 @@ Key features:
 - Translation cache for fast re-runs
 - Paragraph-level translation for pure-text blocks
 
-**[Try it online](https://joshuaswanson.github.io/latex-pdf-translator/)** | [Source on GitHub](https://github.com/joshuaswanson/latex-pdf-translator)
+**[Try it online](https://joshuaswanson.github.io/latex-pdf-translator/)** | [Source on GitHub](https://github.com/joshuaswanson/latex-pdf-translator) | [Buy me a coffee](https://buymeacoffee.com/swanson)
 
 ## Usage
 
