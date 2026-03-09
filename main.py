@@ -1,4 +1,4 @@
-"""Translate a French math LaTeX PDF to English.
+"""Translate a math LaTeX PDF to English.
 
 For each line in the PDF:
 1. Classify spans as text (translatable) or math (preserve)
@@ -21,7 +21,7 @@ from translator.render import render_all, _fix_link_annotations
 def main():
     parser = argparse.ArgumentParser(description="Translate math LaTeX PDFs between languages")
     parser.add_argument("input", help="Input PDF file")
-    parser.add_argument("--source", "-s", default="fr", help="Source language code (default: fr)")
+    parser.add_argument("--source", "-s", required=True, help="Source language code (e.g. fr, de)")
     parser.add_argument("--target", "-t", default="en", help="Target language code (default: en)")
     args = parser.parse_args()
 
