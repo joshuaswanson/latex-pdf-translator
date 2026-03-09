@@ -24,30 +24,14 @@ Key features:
 ## Usage
 
 ```bash
+git clone https://github.com/joshuaswanson/latex-pdf-translator
+cd latex-pdf-translator
+uv sync
 uv run main.py path/to/math.pdf --source fr             # French to English
 uv run main.py path/to/math.pdf --source de --target es  # German to Spanish
 ```
 
 Output is saved as `<input>-<target>.pdf`. A `.cache.json` file is created alongside for fast re-runs.
-
-## Dependencies
-
-```
-pymupdf          # PDF reading, text extraction, redaction, rendering
-deep-translator  # Free Google Translate API wrapper
-```
-
-## Fonts
-
-The following fonts are included (all open source):
-
-| Font                  | File                                    | Purpose                                        |
-| --------------------- | --------------------------------------- | ---------------------------------------------- |
-| CMU Serif Roman       | `translator/fonts/cmunrm.otf`           | Regular translated text                        |
-| CMU Serif Bold        | `translator/fonts/cmunbx.otf`           | Bold text (headings)                           |
-| CMU Serif Italic      | `translator/fonts/cmunti.otf`           | Italic text                                    |
-| CMU Serif Bold Italic | `translator/fonts/cmunbi.otf`           | Bold italic text                               |
-| Latin Modern Math     | `translator/fonts/latinmodern-math.otf` | Math symbols, operators, Greek, script letters |
 
 ## Limitations
 
