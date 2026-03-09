@@ -37,4 +37,3 @@ Output is saved as `<input>-<target>.pdf`. A `.cache.json` file is created along
 
 - Line-level translation for math-containing lines (Google Translate can't reorder words around opaque markers perfectly)
 - Some CMEX extensible delimiter fragments use image fallback when Unicode mapping unavailable
-- Optimized for LaTeX-generated PDFs with standard Computer Modern fonts
