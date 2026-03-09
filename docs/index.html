@@ -128,43 +128,6 @@
         transform: rotate(5deg);
       }
 
-      /* --- Nav pills --- */
-      nav {
-        display: flex;
-        justify-content: center;
-        gap: 0.25rem;
-        margin: 2.5rem 0 3rem;
-        padding: 0.25rem;
-        background: var(--rule-light);
-        border-radius: 8px;
-        width: fit-content;
-        margin-left: auto;
-        margin-right: auto;
-      }
-
-      nav a {
-        font-family: var(--sans);
-        font-size: 0.82rem;
-        font-weight: 500;
-        text-decoration: none;
-        color: var(--ink-faint);
-        padding: 0.5rem 1.1rem;
-        border-radius: 6px;
-        transition: all 0.2s ease;
-        letter-spacing: 0.03em;
-        text-transform: uppercase;
-      }
-
-      nav a:hover {
-        color: var(--ink);
-        background: rgba(255, 255, 255, 0.5);
-      }
-      nav a.active {
-        color: var(--ink);
-        background: var(--warm-white);
-        box-shadow: 0 1px 3px var(--paper-shadow);
-      }
-
       /* --- Sections --- */
       section {
         margin-bottom: 4rem;
@@ -523,9 +486,6 @@
         .math-float {
           display: none;
         }
-        nav {
-          flex-wrap: wrap;
-        }
       }
     </style>
   </head>
@@ -544,12 +504,35 @@
         </p>
       </header>
 
-      <nav class="fade-in">
-        <a href="#how" class="active">How it works</a>
-        <a href="#translate">Translate</a>
-        <a href="#features">Features</a>
-        <a href="#cli">CLI</a>
-      </nav>
+      <!-- Translate -->
+      <section id="translate" class="fade-in">
+        <div class="upload-area">
+          <div class="drop-zone" id="dropZone">
+            <svg
+              class="drop-icon"
+              viewBox="0 0 48 48"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M24 32V12M24 12l-8 8M24 12l8 8" />
+              <path d="M8 36v2a4 4 0 004 4h24a4 4 0 004-4v-2" />
+            </svg>
+            <h3>Drop your PDF here</h3>
+            <p>or <span class="browse" id="browseBtn">browse files</span></p>
+            <div class="file-types">.pdf only</div>
+            <input type="file" id="fileInput" accept=".pdf" hidden />
+          </div>
+
+          <div class="upload-note">
+            <strong>Note:</strong> Client-side translation is not yet available.
+            For now, use the <a href="#cli">command-line tool</a> to translate
+            your PDFs locally. This interface is coming soon.
+          </div>
+        </div>
+      </section>
 
       <!-- How it works -->
       <section id="how" class="fade-in">
@@ -596,43 +579,6 @@
                 vector glyphs with proper Unicode math code points.
               </p>
             </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Translate -->
-      <section id="translate" class="fade-in">
-        <div class="section-label">Translate</div>
-        <h2>Try it</h2>
-        <p>
-          Upload a French math PDF and get back an English version with all
-          notation intact.
-        </p>
-
-        <div class="upload-area">
-          <div class="drop-zone" id="dropZone">
-            <svg
-              class="drop-icon"
-              viewBox="0 0 48 48"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M24 32V12M24 12l-8 8M24 12l8 8" />
-              <path d="M8 36v2a4 4 0 004 4h24a4 4 0 004-4v-2" />
-            </svg>
-            <h3>Drop your PDF here</h3>
-            <p>or <span class="browse" id="browseBtn">browse files</span></p>
-            <div class="file-types">.pdf only</div>
-            <input type="file" id="fileInput" accept=".pdf" hidden />
-          </div>
-
-          <div class="upload-note">
-            <strong>Note:</strong> Client-side translation is not yet available.
-            For now, use the <a href="#cli">command-line tool</a> to translate
-            your PDFs locally. This interface is coming soon.
           </div>
         </div>
       </section>
@@ -753,29 +699,13 @@
           <a href="https://github.com/joshuaswanson/latex-pdf-translator"
             >Source on GitHub</a
           >
+          &middot;
+          <a href="https://buymeacoffee.com/swanson">Buy me a coffee</a>
         </p>
       </footer>
     </div>
 
     <script>
-      // Nav active state
-      const navLinks = document.querySelectorAll("nav a");
-      const sections = document.querySelectorAll("section");
-
-      function updateNav() {
-        let current = "";
-        sections.forEach((s) => {
-          if (window.scrollY >= s.offsetTop - 200) current = s.id;
-        });
-        navLinks.forEach((a) => {
-          a.classList.toggle(
-            "active",
-            a.getAttribute("href") === "#" + current,
-          );
-        });
-      }
-      window.addEventListener("scroll", updateNav, { passive: true });
-
       // Drop zone interactions
       const dropZone = document.getElementById("dropZone");
       const fileInput = document.getElementById("fileInput");
