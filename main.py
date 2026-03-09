@@ -7,6 +7,7 @@ For each line in the PDF:
 4. Re-render: white-out original line, place translated text + math glyph images
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -18,12 +19,17 @@ from translator.render import render_all, _fix_link_annotations
 
 
 def main():
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <input.pdf>")
-        sys.exit(1)
-    input_path = sys.argv[1]
+    parser = argparse.ArgumentParser(description="Translate math LaTeX PDFs between languages")
+    parser.add_argument("input", help="Input PDF file")
+    parser.add_argument("--source", "-s", default="fr", help="Source language code (default: fr)")
+    parser.add_argument("--target", "-t", default="en", help="Target language code (default: en)")
+    args = parser.parse_args()
 
-    output_path = Path(input_path).stem + "-en.pdf"
+    input_path = args.input
+    source_lang = args.source
+    target_lang = args.target
+
+    output_path = Path(input_path).stem + f"-{target_lang}.pdf"
     print(f"Input:  {input_path}")
     print(f"Output: {output_path}")
 
@@ -38,7 +44,8 @@ def main():
     # Step 2: Translate (with disk cache for fast re-runs)
     cache_path = Path(input_path).with_suffix(".cache.json")
     print("\nTranslating via Google Translate...")
-    translations = translate_lines(lines, cache_path=cache_path)
+    translations = translate_lines(lines, cache_path=cache_path,
+                                    source=source_lang, target=target_lang)
 
     # Step 3: Render
     print("\nRendering translations...")

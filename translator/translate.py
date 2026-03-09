@@ -217,14 +217,16 @@ def _save_cache(cache_path: Path, cache: dict):
 
 
 def translate_lines(lines: list[TranslatableLine],
-                    cache_path: Path | None = None) -> list[str]:
+                    cache_path: Path | None = None,
+                    source: str = 'fr',
+                    target: str = 'en') -> list[str]:
     """Translate all lines via Google Translate (free).
 
     Groups consecutive body-text lines into paragraphs for better translation
     quality, then splits results back to per-line for rendering.
     Uses a disk cache to avoid re-translating on subsequent runs.
     """
-    translator = GoogleTranslator(source='fr', target='en')
+    translator = GoogleTranslator(source=source, target=target)
     groups = _group_paragraphs(lines)
 
     # Load translation cache
