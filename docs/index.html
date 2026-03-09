@@ -29,6 +29,7 @@
         --accent-soft: #d4694e;
         --rule: #d4cdc5;
         --rule-light: #e8e2db;
+        --green: #2e7d32;
         --paper-shadow: rgba(26, 22, 20, 0.06);
         --serif: "Cormorant Garamond", "Georgia", serif;
         --sans: "Source Sans 3", "Helvetica Neue", sans-serif;
@@ -43,7 +44,8 @@
         font-family: var(--sans);
         background: var(--cream);
         color: var(--ink);
-        line-height: 1.6;
+        font-size: 1.05rem;
+        line-height: 1.7;
         overflow-x: hidden;
         -webkit-font-smoothing: antialiased;
       }
@@ -68,7 +70,7 @@
 
       /* --- Header --- */
       header {
-        padding: 4rem 0 3rem;
+        padding: 4rem 0 2rem;
         text-align: center;
         position: relative;
       }
@@ -83,7 +85,7 @@
       header h1 {
         font-family: var(--serif);
         font-weight: 700;
-        font-size: clamp(2.4rem, 5vw, 3.6rem);
+        font-size: clamp(2.6rem, 5.5vw, 4rem);
         letter-spacing: -0.02em;
         line-height: 1.15;
         margin-bottom: 0.6rem;
@@ -96,11 +98,11 @@
 
       .subtitle {
         font-family: var(--serif);
-        font-size: 1.25rem;
+        font-size: 1.4rem;
         font-weight: 400;
         font-style: italic;
         color: var(--ink-faint);
-        max-width: 500px;
+        max-width: 540px;
         margin: 0 auto;
         line-height: 1.5;
       }
@@ -113,14 +115,14 @@
         color: var(--rule);
         pointer-events: none;
         user-select: none;
-        font-size: 1.1rem;
+        font-size: 1.2rem;
       }
 
       .math-float.left {
         left: -1rem;
         top: 3rem;
         transform: rotate(-8deg);
-        font-size: 0.95rem;
+        font-size: 1.05rem;
       }
       .math-float.right {
         right: -0.5rem;
@@ -135,7 +137,7 @@
 
       .section-label {
         font-family: var(--mono);
-        font-size: 0.7rem;
+        font-size: 0.8rem;
         font-weight: 500;
         text-transform: uppercase;
         letter-spacing: 0.15em;
@@ -145,7 +147,7 @@
 
       section h2 {
         font-family: var(--serif);
-        font-size: 1.9rem;
+        font-size: 2.2rem;
         font-weight: 600;
         margin-bottom: 1rem;
         letter-spacing: -0.01em;
@@ -153,9 +155,207 @@
 
       section p {
         color: var(--ink-light);
-        font-size: 0.95rem;
+        font-size: 1.05rem;
         line-height: 1.75;
         max-width: 640px;
+      }
+
+      /* --- Language selectors --- */
+      .lang-row {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.75rem;
+        margin-bottom: 1.25rem;
+      }
+
+      .lang-row label {
+        font-family: var(--sans);
+        font-size: 0.95rem;
+        font-weight: 500;
+        color: var(--ink-faint);
+      }
+
+      .lang-row select {
+        font-family: var(--sans);
+        font-size: 0.95rem;
+        padding: 0.45rem 0.75rem;
+        border: 1px solid var(--rule);
+        border-radius: 6px;
+        background: var(--warm-white);
+        color: var(--ink);
+        cursor: pointer;
+        appearance: auto;
+      }
+
+      .lang-arrow {
+        font-size: 1.2rem;
+        color: var(--ink-faint);
+      }
+
+      /* --- Upload zone --- */
+      .upload-area {
+        margin-top: 1.5rem;
+        position: relative;
+      }
+
+      .drop-zone {
+        border: 2px dashed var(--rule);
+        border-radius: 12px;
+        padding: 3.5rem 2rem;
+        text-align: center;
+        background: var(--warm-white);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .drop-zone::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(
+          circle at 50% 50%,
+          rgba(184, 67, 47, 0.03),
+          transparent 70%
+        );
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+
+      .drop-zone:hover {
+        border-color: var(--accent-soft);
+      }
+      .drop-zone:hover::before {
+        opacity: 1;
+      }
+      .drop-zone.drag-over {
+        border-color: var(--accent);
+        background: rgba(184, 67, 47, 0.03);
+        transform: scale(1.005);
+      }
+      .drop-zone.processing {
+        cursor: default;
+        border-style: solid;
+        border-color: var(--rule);
+        animation: pulse-border 2s ease-in-out infinite;
+      }
+      .drop-zone.done {
+        cursor: default;
+        border-style: solid;
+        border-color: var(--green);
+      }
+      .drop-zone.error {
+        cursor: default;
+        border-style: solid;
+        border-color: var(--accent);
+      }
+
+      @keyframes pulse-border {
+        0%,
+        100% {
+          border-color: var(--rule);
+        }
+        50% {
+          border-color: var(--accent-soft);
+        }
+      }
+
+      .drop-icon {
+        width: 52px;
+        height: 52px;
+        margin: 0 auto 1rem;
+        opacity: 0.35;
+      }
+
+      .drop-zone h3 {
+        font-family: var(--serif);
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-bottom: 0.4rem;
+      }
+
+      .drop-zone p {
+        font-size: 1rem;
+        color: var(--ink-faint);
+        max-width: none;
+        margin: 0 auto;
+      }
+
+      .drop-zone .browse {
+        color: var(--accent);
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        cursor: pointer;
+      }
+
+      .file-types {
+        margin-top: 1rem;
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        color: var(--rule);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .upload-note {
+        margin-top: 1.25rem;
+        text-align: center;
+        font-size: 0.9rem;
+        color: var(--ink-faint);
+        line-height: 1.6;
+      }
+
+      /* --- Progress spinner --- */
+      .spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid var(--rule-light);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        margin: 0 auto 1rem;
+        animation: spin 0.8s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* --- Download button --- */
+      .download-btn {
+        display: inline-block;
+        margin-top: 1rem;
+        padding: 0.6rem 1.5rem;
+        font-family: var(--sans);
+        font-size: 1rem;
+        font-weight: 500;
+        color: white;
+        background: var(--green);
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        text-decoration: none;
+        transition: background 0.2s ease;
+      }
+
+      .download-btn:hover {
+        background: #256d29;
+      }
+
+      .reset-link {
+        display: block;
+        margin-top: 0.75rem;
+        font-size: 0.95rem;
+        color: var(--accent);
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        background: none;
+        border: none;
+        font-family: var(--sans);
       }
 
       /* --- Pipeline steps --- */
@@ -199,121 +399,25 @@
 
       .step h3 {
         font-family: var(--serif);
-        font-size: 1.15rem;
+        font-size: 1.3rem;
         font-weight: 600;
         margin-bottom: 0.3rem;
       }
 
       .step p {
-        font-size: 0.88rem;
+        font-size: 1rem;
         color: var(--ink-faint);
-        line-height: 1.6;
+        line-height: 1.7;
         max-width: none;
       }
 
       .step code {
         font-family: var(--mono);
-        font-size: 0.78rem;
+        font-size: 0.85rem;
         background: var(--cream);
         padding: 0.15em 0.4em;
         border-radius: 3px;
         color: var(--ink-light);
-      }
-
-      /* --- Upload zone --- */
-      .upload-area {
-        margin-top: 2rem;
-        position: relative;
-      }
-
-      .drop-zone {
-        border: 2px dashed var(--rule);
-        border-radius: 12px;
-        padding: 3.5rem 2rem;
-        text-align: center;
-        background: var(--warm-white);
-        cursor: pointer;
-        transition: all 0.3s ease;
-        position: relative;
-        overflow: hidden;
-      }
-
-      .drop-zone::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: radial-gradient(
-          circle at 50% 50%,
-          rgba(184, 67, 47, 0.03),
-          transparent 70%
-        );
-        opacity: 0;
-        transition: opacity 0.3s ease;
-      }
-
-      .drop-zone:hover {
-        border-color: var(--accent-soft);
-      }
-      .drop-zone:hover::before {
-        opacity: 1;
-      }
-      .drop-zone.drag-over {
-        border-color: var(--accent);
-        background: rgba(184, 67, 47, 0.03);
-        transform: scale(1.005);
-      }
-
-      .drop-icon {
-        width: 48px;
-        height: 48px;
-        margin: 0 auto 1rem;
-        opacity: 0.35;
-      }
-
-      .drop-zone h3 {
-        font-family: var(--serif);
-        font-size: 1.3rem;
-        font-weight: 600;
-        margin-bottom: 0.4rem;
-      }
-
-      .drop-zone p {
-        font-size: 0.85rem;
-        color: var(--ink-faint);
-        max-width: none;
-        margin: 0 auto;
-      }
-
-      .drop-zone .browse {
-        color: var(--accent);
-        text-decoration: underline;
-        text-underline-offset: 2px;
-        cursor: pointer;
-      }
-
-      .file-types {
-        margin-top: 1rem;
-        font-family: var(--mono);
-        font-size: 0.7rem;
-        color: var(--rule);
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-      }
-
-      .upload-note {
-        margin-top: 1.25rem;
-        padding: 1rem 1.25rem;
-        background: var(--warm-white);
-        border-left: 2.5px solid var(--accent);
-        border-radius: 0 6px 6px 0;
-        font-size: 0.82rem;
-        color: var(--ink-faint);
-        line-height: 1.6;
-      }
-
-      .upload-note strong {
-        color: var(--ink-light);
-        font-weight: 600;
       }
 
       /* --- Features --- */
@@ -339,22 +443,22 @@
       }
 
       .feature-icon {
-        font-size: 1.2rem;
+        font-size: 1.3rem;
         margin-bottom: 0.6rem;
         opacity: 0.7;
       }
 
       .feature h4 {
         font-family: var(--serif);
-        font-size: 1rem;
+        font-size: 1.15rem;
         font-weight: 600;
         margin-bottom: 0.3rem;
       }
 
       .feature p {
-        font-size: 0.8rem;
+        font-size: 0.95rem;
         color: var(--ink-faint);
-        line-height: 1.55;
+        line-height: 1.6;
         max-width: none;
       }
 
@@ -395,7 +499,7 @@
       .cli-body {
         padding: 1.25rem 1.5rem;
         font-family: var(--mono);
-        font-size: 0.82rem;
+        font-size: 0.9rem;
         line-height: 1.8;
         color: #c7bfb6;
       }
@@ -422,7 +526,7 @@
       }
 
       footer p {
-        font-size: 0.8rem;
+        font-size: 0.95rem;
         color: var(--ink-faint);
         margin: 0 auto;
       }
@@ -486,6 +590,9 @@
         .math-float {
           display: none;
         }
+        .lang-row {
+          flex-wrap: wrap;
+        }
       }
     </style>
   </head>
@@ -499,13 +606,48 @@
         <div class="header-rule"></div>
         <h1>LaTeX PDF <span>Translator</span></h1>
         <p class="subtitle">
-          Translate French mathematical PDFs to English, preserving every symbol
-          as crisp vector text.
+          Translate mathematical PDFs to English from any language, preserving
+          every symbol as crisp vector text.
         </p>
       </header>
 
       <!-- Translate -->
       <section id="translate" class="fade-in">
+        <div class="lang-row">
+          <label for="sourceLang">Translate from</label>
+          <select id="sourceLang">
+            <option value="auto">Auto-detect</option>
+            <option value="ar">Arabic</option>
+            <option value="zh-CN">Chinese (Simplified)</option>
+            <option value="zh-TW">Chinese (Traditional)</option>
+            <option value="cs">Czech</option>
+            <option value="da">Danish</option>
+            <option value="nl">Dutch</option>
+            <option value="fi">Finnish</option>
+            <option value="fr" selected>French</option>
+            <option value="de">German</option>
+            <option value="el">Greek</option>
+            <option value="he">Hebrew</option>
+            <option value="hi">Hindi</option>
+            <option value="hu">Hungarian</option>
+            <option value="it">Italian</option>
+            <option value="ja">Japanese</option>
+            <option value="ko">Korean</option>
+            <option value="no">Norwegian</option>
+            <option value="pl">Polish</option>
+            <option value="pt">Portuguese</option>
+            <option value="ro">Romanian</option>
+            <option value="ru">Russian</option>
+            <option value="es">Spanish</option>
+            <option value="sv">Swedish</option>
+            <option value="th">Thai</option>
+            <option value="tr">Turkish</option>
+            <option value="uk">Ukrainian</option>
+            <option value="vi">Vietnamese</option>
+          </select>
+          <span class="lang-arrow">&rarr; English</span>
+        </div>
+
         <div class="upload-area">
           <div class="drop-zone" id="dropZone">
             <svg
@@ -522,15 +664,14 @@
             </svg>
             <h3>Drop your PDF here</h3>
             <p>or <span class="browse" id="browseBtn">browse files</span></p>
-            <div class="file-types">.pdf only</div>
+            <div class="file-types">.pdf &middot; max 50 MB</div>
             <input type="file" id="fileInput" accept=".pdf" hidden />
           </div>
 
-          <div class="upload-note">
-            <strong>Note:</strong> Client-side translation is not yet available.
-            For now, use the <a href="#cli">command-line tool</a> to translate
-            your PDFs locally. This interface is coming soon.
-          </div>
+          <p class="upload-note">
+            Your PDF is processed on our server and not stored after
+            translation.
+          </p>
         </div>
       </section>
 
@@ -631,10 +772,10 @@
           </div>
           <div class="feature">
             <div class="feature-icon">&harr;</div>
-            <h4>Translation cache</h4>
+            <h4>Any source language</h4>
             <p>
-              Results are cached to disk. Re-running on the same PDF skips
-              already-translated lines instantly.
+              Translate to English from any language supported by Google
+              Translate.
             </p>
           </div>
         </div>
@@ -649,7 +790,7 @@
           <code
             style="
               font-family: var(--mono);
-              font-size: 0.85rem;
+              font-size: 0.95rem;
               background: var(--cream);
               padding: 0.15em 0.4em;
               border-radius: 3px;
@@ -674,9 +815,17 @@
             <span class="prompt">$</span>
             <span class="cmd">cd latex-pdf-translator</span><br />
             <br />
-            <span class="comment"># Translate a PDF</span><br />
+            <span class="comment"
+              ># Translate a PDF (default: French to English)</span
+            ><br />
             <span class="prompt">$</span>
             <span class="cmd">uv run main.py lecture-notes.pdf</span><br />
+            <br />
+            <span class="comment"># Translate German to Spanish</span><br />
+            <span class="prompt">$</span>
+            <span class="cmd"
+              >uv run main.py notes.pdf --source de --target es</span
+            ><br />
             <br />
             <span class="output">Extracting translatable lines...</span><br />
             <span class="output"
@@ -706,17 +855,23 @@
     </div>
 
     <script>
-      // Drop zone interactions
+      const API_BASE = "https://latex-pdf-translator.onrender.com";
+
       const dropZone = document.getElementById("dropZone");
       const fileInput = document.getElementById("fileInput");
       const browseBtn = document.getElementById("browseBtn");
+      const sourceLang = document.getElementById("sourceLang");
+
+      // Store original drop zone HTML for reset
+      const originalDropHTML = dropZone.innerHTML;
 
       browseBtn.addEventListener("click", () => fileInput.click());
 
       ["dragenter", "dragover"].forEach((evt) => {
         dropZone.addEventListener(evt, (e) => {
           e.preventDefault();
-          dropZone.classList.add("drag-over");
+          if (!dropZone.classList.contains("processing"))
+            dropZone.classList.add("drag-over");
         });
       });
 
@@ -728,25 +883,127 @@
       });
 
       dropZone.addEventListener("drop", (e) => {
+        if (dropZone.classList.contains("processing")) return;
         const file = e.dataTransfer.files[0];
-        if (file && file.type === "application/pdf") handleFile(file);
+        if (file && file.type === "application/pdf") uploadFile(file);
       });
 
       fileInput.addEventListener("change", () => {
-        if (fileInput.files[0]) handleFile(fileInput.files[0]);
+        if (fileInput.files[0]) uploadFile(fileInput.files[0]);
       });
 
-      function handleFile(file) {
-        dropZone.querySelector("h3").textContent = file.name;
-        dropZone.querySelector("p").textContent = formatSize(file.size);
-        dropZone.querySelector(".file-types").textContent =
-          "Client-side translation coming soon";
+      async function uploadFile(file) {
+        // Show processing state
+        dropZone.className = "drop-zone processing";
+        dropZone.innerHTML =
+          '<div class="spinner"></div>' +
+          "<h3>Uploading...</h3>" +
+          '<p style="color: var(--ink-faint)">' +
+          file.name +
+          "</p>";
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const src = sourceLang.value;
+
+        try {
+          const res = await fetch(
+            API_BASE +
+              "/translate?source=" +
+              encodeURIComponent(src) +
+              "&target=en",
+            { method: "POST", body: formData },
+          );
+
+          if (!res.ok) {
+            const err = await res
+              .json()
+              .catch(() => ({ detail: "Upload failed" }));
+            throw new Error(err.detail || "Upload failed");
+          }
+
+          const { job_id } = await res.json();
+          pollStatus(job_id, file.name);
+        } catch (e) {
+          showError(e.message);
+        }
       }
 
-      function formatSize(bytes) {
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
-        return (bytes / 1048576).toFixed(1) + " MB";
+      async function pollStatus(jobId, filename) {
+        const startTime = Date.now();
+
+        const poll = async () => {
+          try {
+            const res = await fetch(API_BASE + "/status/" + jobId);
+            const data = await res.json();
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+            if (data.status === "processing") {
+              dropZone.innerHTML =
+                '<div class="spinner"></div>' +
+                "<h3>" +
+                data.stage +
+                "</h3>" +
+                '<p style="color: var(--ink-faint)">' +
+                elapsed +
+                "s elapsed</p>";
+              setTimeout(poll, 2000);
+            } else if (data.status === "done") {
+              showDone(jobId, filename);
+            } else {
+              showError(data.error || "Translation failed");
+            }
+          } catch (e) {
+            showError("Lost connection to server. Please try again.");
+          }
+        };
+
+        poll();
+      }
+
+      function showDone(jobId, filename) {
+        const outName = filename.replace(/\.pdf$/i, "") + "-translated.pdf";
+        dropZone.className = "drop-zone done";
+        dropZone.innerHTML =
+          '<h3 style="color: var(--green)">Translation complete</h3>' +
+          "<p>" +
+          outName +
+          "</p>" +
+          '<a class="download-btn" href="' +
+          API_BASE +
+          "/download/" +
+          jobId +
+          '" download="' +
+          outName +
+          '">Download PDF</a>' +
+          '<button class="reset-link" onclick="resetDropZone()">Translate another</button>';
+      }
+
+      function showError(message) {
+        dropZone.className = "drop-zone error";
+        dropZone.innerHTML =
+          '<h3 style="color: var(--accent)">Something went wrong</h3>' +
+          '<p style="color: var(--ink-faint)">' +
+          escapeHtml(message) +
+          "</p>" +
+          '<button class="reset-link" onclick="resetDropZone()">Try again</button>';
+      }
+
+      function resetDropZone() {
+        dropZone.className = "drop-zone";
+        dropZone.innerHTML = originalDropHTML;
+        fileInput.value = "";
+        // Re-bind browse button
+        document
+          .getElementById("browseBtn")
+          .addEventListener("click", () => fileInput.click());
+      }
+
+      function escapeHtml(str) {
+        const d = document.createElement("div");
+        d.textContent = str;
+        return d.innerHTML;
       }
 
       // Scroll-triggered fade-in
