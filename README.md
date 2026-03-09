@@ -24,8 +24,8 @@ Key features:
 ## Usage
 
 ```bash
-uv run main.py path/to/math.pdf                        # French to English (default)
-uv run main.py path/to/math.pdf --source de --target es # German to Spanish
+uv run main.py path/to/math.pdf --source fr             # French to English
+uv run main.py path/to/math.pdf --source de --target es  # German to Spanish
 ```
 
 Output is saved as `<input>-<target>.pdf`. A `.cache.json` file is created alongside for fast re-runs.
