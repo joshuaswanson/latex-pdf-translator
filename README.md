@@ -18,10 +18,11 @@ Key features:
 - Translation cache for fast re-runs
 - Paragraph-level translation for pure-text blocks
 
+**[Try it online](https://joshuaswanson.github.io/latex-pdf-translator/)** | [Source on GitHub](https://github.com/joshuaswanson/latex-pdf-translator)
+
 ## Usage
 
 ```bash
-uv run main.py                          # translate fonctionsdunevariable.pdf
 uv run main.py path/to/french-math.pdf  # translate any French math PDF
 ```
 
@@ -38,13 +39,13 @@ deep-translator  # Free Google Translate API wrapper
 
 The following fonts are included (all open source):
 
-| Font                  | File                   | Purpose                                        |
-| --------------------- | ---------------------- | ---------------------------------------------- |
-| CMU Serif Roman       | `cmunrm.otf`           | Regular translated text                        |
-| CMU Serif Bold        | `cmunbx.otf`           | Bold text (headings)                           |
-| CMU Serif Italic      | `cmunti.otf`           | Italic text                                    |
-| CMU Serif Bold Italic | `cmunbi.otf`           | Bold italic text                               |
-| Latin Modern Math     | `latinmodern-math.otf` | Math symbols, operators, Greek, script letters |
+| Font                  | File                                    | Purpose                                        |
+| --------------------- | --------------------------------------- | ---------------------------------------------- |
+| CMU Serif Roman       | `translator/fonts/cmunrm.otf`           | Regular translated text                        |
+| CMU Serif Bold        | `translator/fonts/cmunbx.otf`           | Bold text (headings)                           |
+| CMU Serif Italic      | `translator/fonts/cmunti.otf`           | Italic text                                    |
+| CMU Serif Bold Italic | `translator/fonts/cmunbi.otf`           | Bold italic text                               |
+| Latin Modern Math     | `translator/fonts/latinmodern-math.otf` | Math symbols, operators, Greek, script letters |
 
 ## Limitations
 
