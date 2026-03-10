@@ -82,8 +82,17 @@ def _run_pipeline(job_id: str, pdf_bytes: bytes, source: str, target: str):
                                        progress_callback=on_progress)
 
         job.stage = "Rendering translated PDF..."
+        job.progress = 0
+        job.total = 0
+
+        def on_render_progress(completed, total):
+            job.progress = completed
+            job.total = total
+            job.stage = f"Rendering... ({completed}/{total} pages)"
+
         annot_colors, rendered_extents, link_texts = render_all(
-            work_doc, orig_doc, lines, translations
+            work_doc, orig_doc, lines, translations,
+            progress_callback=on_render_progress
         )
 
         out_bytes = work_doc.tobytes(garbage=4, deflate=True)

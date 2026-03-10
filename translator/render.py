@@ -56,7 +56,7 @@ MATH_FONT_STYLE = {
 
 
 def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
-               translations: list[str]):
+               translations: list[str], progress_callback=None):
     """Apply all translations to the work document."""
     # Group lines by page, filtering unchanged ones
     page_lines = {}
@@ -92,7 +92,11 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
                 all_link_texts[key] = link_text
 
     changed = 0
-    for page_idx in sorted(page_lines):
+    pages_to_render = sorted(page_lines)
+    total_pages = len(pages_to_render)
+    if progress_callback:
+        progress_callback(0, total_pages)
+    for page_num, page_idx in enumerate(pages_to_render):
         page = work_doc[page_idx]
         orig_page = orig_doc[page_idx]
 
@@ -138,6 +142,9 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
             orig_x0, orig_x1 = line.bbox[0], line.bbox[2]
             rendered_extents[(page_idx, round(y_mid))] = (orig_x0, orig_x1, line.bbox[0], text_end_x)
             changed += 1
+
+        if progress_callback:
+            progress_callback(page_num + 1, total_pages)
 
     print(f"  {changed} lines modified")
     return all_annot_colors, rendered_extents, all_link_texts
