@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LaTeX PDF Translator</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css"
+    />
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js"
+    ></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -122,8 +130,6 @@
       /* --- Decorative math floats --- */
       .math-float {
         position: absolute;
-        font-family: var(--serif);
-        font-style: italic;
         color: var(--rule);
         pointer-events: none;
         user-select: none;
@@ -584,54 +590,77 @@
   <body>
     <div class="container">
       <header>
+        <!-- Decorative math symbols (rendered by KaTeX) -->
         <span
           class="math-float"
-          style="
-            left: -1rem;
-            top: 2rem;
-            display: inline-flex;
-            flex-direction: column;
-            align-items: center;
-            line-height: 1;
-            font-size: 0.7rem;
-            gap: 0.1em;
-          "
-          ><span>&infin;</span><span style="font-size: 1.8em">&sum;</span
-          ><span>n=0</span></span
-        >
-        <span class="math-float" style="right: 0; top: 2.5rem"
-          >&part;f/&part;x</span
-        >
+          style="left: -2rem; top: 1.5rem; font-size: 1.4rem"
+          data-tex="\displaystyle\sum_{n=0}^{\infty}"
+        ></span>
         <span
           class="math-float"
-          style="left: 1rem; top: 7rem; font-size: 0.95rem"
-          >&alpha; + &beta;</span
-        >
+          style="right: -1rem; top: 2rem; font-size: 1.5rem"
+          data-tex="\partial f / \partial x"
+        ></span>
         <span
           class="math-float"
-          style="right: 1.5rem; top: 7.5rem; font-size: 0.95rem"
-          >&int;</span
-        >
+          style="left: 2rem; top: 7rem; font-size: 1.4rem"
+          data-tex="\alpha + \beta"
+        ></span>
         <span
           class="math-float"
-          style="left: -0.5rem; top: 11rem; font-size: 1rem"
-          >&forall;&epsilon;&gt;0</span
-        >
+          style="right: 2rem; top: 7rem; font-size: 1.8rem"
+          data-tex="\displaystyle\int"
+        ></span>
         <span
           class="math-float"
-          style="right: -0.5rem; top: 11.5rem; font-size: 0.9rem"
-          >&nabla;f</span
-        >
+          style="left: -1.5rem; top: 11rem; font-size: 1.3rem"
+          data-tex="\forall\,\epsilon > 0"
+        ></span>
         <span
           class="math-float"
-          style="left: 3rem; top: 5rem; font-size: 0.9rem"
-          >&xi;</span
-        >
+          style="right: -1rem; top: 11.5rem; font-size: 1.4rem"
+          data-tex="\nabla f"
+        ></span>
         <span
           class="math-float"
-          style="right: 3rem; top: 5rem; font-size: 0.9rem"
-          >&infin;</span
-        >
+          style="left: 4rem; top: 4.5rem; font-size: 1.3rem"
+          data-tex="\xi"
+        ></span>
+        <span
+          class="math-float"
+          style="right: 4rem; top: 4.5rem; font-size: 1.3rem"
+          data-tex="\infty"
+        ></span>
+        <span
+          class="math-float"
+          style="left: -0.5rem; top: 14rem; font-size: 1.3rem"
+          data-tex="\lambda"
+        ></span>
+        <span
+          class="math-float"
+          style="right: 0.5rem; top: 14.5rem; font-size: 1.3rem"
+          data-tex="\pi"
+        ></span>
+        <span
+          class="math-float"
+          style="left: 3rem; top: 9.5rem; font-size: 1.2rem"
+          data-tex="dx"
+        ></span>
+        <span
+          class="math-float"
+          style="right: 3.5rem; top: 10rem; font-size: 1.3rem"
+          data-tex="\in"
+        ></span>
+        <span
+          class="math-float"
+          style="left: 5rem; top: 2rem; font-size: 1.2rem"
+          data-tex="\otimes"
+        ></span>
+        <span
+          class="math-float"
+          style="right: 5.5rem; top: 1.5rem; font-size: 1.3rem"
+          data-tex="\sqrt{\phantom{x}}"
+        ></span>
         <div class="header-rule"></div>
         <h1>LaTeX PDF <span>Translator</span></h1>
         <p class="subtitle">
@@ -942,6 +971,20 @@
         d.textContent = str;
         return d.innerHTML;
       }
+
+      // Render decorative math symbols with KaTeX
+      document.addEventListener("DOMContentLoaded", () => {
+        const renderMath = () => {
+          document.querySelectorAll("[data-tex]").forEach((el) => {
+            katex.render(el.dataset.tex, el, { throwOnError: false });
+          });
+        };
+        if (window.katex) renderMath();
+        else
+          document
+            .querySelector('script[src*="katex"]')
+            .addEventListener("load", renderMath);
+      });
     </script>
   </body>
 </html>
