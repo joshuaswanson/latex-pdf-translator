@@ -17,7 +17,7 @@ Key features:
 - Hyperlink annotations preserved
 - Translation cache for fast re-runs
 - Paragraph-level translation for pure-text blocks
-- Any source language supported by Google Translate
+- Any source language supported by Google Translate (web UI currently limited to French and German)
 
 **[Try it online](https://joshuaswanson.github.io/latex-pdf-translator/)** | [Source on GitHub](https://github.com/joshuaswanson/latex-pdf-translator) | [Buy me a coffee](https://buymeacoffee.com/swanson)
 
