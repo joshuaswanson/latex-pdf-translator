@@ -107,6 +107,18 @@
         line-height: 1.5;
       }
 
+      .beta-note {
+        margin-top: 1rem;
+        font-size: 0.95rem;
+        color: var(--ink-faint);
+      }
+
+      .beta-note a {
+        color: var(--accent);
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+
       /* --- Decorative math float --- */
       .math-float {
         position: absolute;
@@ -609,6 +621,12 @@
           Translate mathematical PDFs from French or German to English,
           preserving every symbol as crisp vector text.
         </p>
+        <p class="beta-note">
+          This tool is in beta.
+          <a href="https://github.com/joshuaswanson/latex-pdf-translator/issues"
+            >Feedback welcome.</a
+          >
+        </p>
       </header>
 
       <!-- Translate -->
@@ -651,113 +669,25 @@
 
       <!-- How it works -->
       <section id="how" class="fade-in">
-        <div class="section-label">Pipeline</div>
         <h2>How it works</h2>
         <p>
-          The translator operates directly on PDF internals without OCR or
-          rasterization. Mathematical notation passes through untouched.
+          The tool reads PDF text spans directly and classifies each one as
+          either translatable text or mathematical notation based on the
+          embedded font (e.g. CMMI, CMSY, CMEX for math). Text spans are sent to
+          Google Translate with placeholder tokens where math appears. The
+          translated text is then re-rendered into the PDF using CMU Serif and
+          Latin Modern Math, keeping all output as searchable vector text.
         </p>
-
-        <div class="pipeline">
-          <div class="step">
-            <div class="step-num">1</div>
-            <div>
-              <h3>Extract</h3>
-              <p>
-                Parse every text span in the PDF. Classify each as translatable
-                text (<code>SFRM</code>, <code>SFBX</code>,
-                <code>SFTI</code> fonts) or math notation (<code>CMMI</code>,
-                <code>CMSY</code>, <code>CMEX</code>, etc.) to be preserved
-                exactly.
-              </p>
-            </div>
-          </div>
-          <div class="step">
-            <div class="step-num">2</div>
-            <div>
-              <h3>Translate</h3>
-              <p>
-                Send text to Google Translate with opaque
-                <code>XXXM0XXX</code> markers standing in for math spans. Google
-                preserves these tokens, and the translator restores them after
-                translation.
-              </p>
-            </div>
-          </div>
-          <div class="step">
-            <div class="step-num">3</div>
-            <div>
-              <h3>Render</h3>
-              <p>
-                Redact original text from the PDF, then re-render using CMU
-                Serif for text and Latin Modern Math for symbols, all as real
-                vector glyphs with proper Unicode math code points.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Features -->
-      <section id="features" class="fade-in">
-        <div class="section-label">Details</div>
-        <h2>Features</h2>
-
-        <div class="features-grid">
-          <div class="feature">
-            <div class="feature-icon">&int;</div>
-            <h4>Vector math symbols</h4>
-            <p>
-              All math notation rendered as real vector text using Latin Modern
-              Math, without rasterized images.
-            </p>
-          </div>
-          <div class="feature">
-            <div class="feature-icon">&xi;</div>
-            <h4>Proper math italics</h4>
-            <p>
-              Variables use Unicode Mathematical Italic code points for correct
-              typographic rendering.
-            </p>
-          </div>
-          <div class="feature">
-            <div class="feature-icon">&para;</div>
-            <h4>Paragraph-level translation</h4>
-            <p>
-              Pure-text blocks are merged into paragraphs before translation for
-              more natural output.
-            </p>
-          </div>
-          <div class="feature">
-            <div class="feature-icon">&middot;&middot;&middot;</div>
-            <h4>TOC preservation</h4>
-            <p>
-              Table of contents dot leaders, page numbers, and hyperlink
-              annotations are regenerated correctly.
-            </p>
-          </div>
-          <div class="feature">
-            <div class="feature-icon">B</div>
-            <h4>Style preservation</h4>
-            <p>
-              Bold, italic, and bold-italic text styles are detected and
-              preserved through translation.
-            </p>
-          </div>
-          <div class="feature">
-            <div class="feature-icon">&harr;</div>
-            <h4>Any source language</h4>
-            <p>
-              Translate to English from any language supported by Google
-              Translate.
-            </p>
-          </div>
-        </div>
+        <p style="margin-top: 0.75rem">
+          Bold, italic, and bold-italic styles are preserved. Table of contents
+          entries, dot leaders, page numbers, and hyperlink annotations are
+          regenerated. Pure-text blocks (without math) are merged into
+          paragraphs before translation for more natural results.
+        </p>
       </section>
 
       <!-- CLI -->
       <section id="cli" class="fade-in">
-        <div class="section-label">Installation</div>
         <h2>Command line</h2>
         <p>
           Clone the repo and run with
@@ -789,11 +719,11 @@
             <span class="prompt">$</span>
             <span class="cmd">cd latex-pdf-translator</span><br />
             <br />
-            <span class="comment"
-              ># Translate a PDF (default: French to English)</span
+            <span class="comment"># Translate a French PDF to English</span
             ><br />
             <span class="prompt">$</span>
-            <span class="cmd">uv run main.py lecture-notes.pdf</span><br />
+            <span class="cmd">uv run main.py lecture-notes.pdf --source fr</span
+            ><br />
             <br />
             <span class="comment"># Translate German to Spanish</span><br />
             <span class="prompt">$</span>
