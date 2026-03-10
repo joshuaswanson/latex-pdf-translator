@@ -366,10 +366,46 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
                                 stacked.add(gi)
                                 stacked.add(gj)
 
+            # Pre-process: attach superscript/subscript spans to preceding
+            # rsfs/EUFM spans so they get copied as one compound glyph.
+            # This preserves e.g. C^r where the script C and superscript r
+            # must be rendered together from the original.
+            attached = set()  # indices of spans absorbed into a preceding span
+            for gi in range(len(group) - 1):
+                ms_cur = group[gi]
+                prefix_cur = _math_font_prefix(ms_cur.font)
+                if prefix_cur not in ("rsfs", "EUFM"):
+                    continue
+                if not ms_cur.text.strip():
+                    continue
+                # Collect following spans that are superscripts/subscripts
+                extras = []
+                for gj in range(gi + 1, len(group)):
+                    ms_next = group[gj]
+                    if not ms_next.text.strip():
+                        extras.append(ms_next)
+                        attached.add(gj)
+                        continue
+                    # Check if it's a super/subscript: smaller size, x starts
+                    # near the right edge of the current span.
+                    # Note: origin[1] can be identical for superscripts in some
+                    # PDFs (e.g. rsfs C^r both report same baseline), so we
+                    # rely on size difference alone.
+                    if (ms_next.size < ms_cur.size
+                            and abs(ms_next.bbox[0] - ms_cur.bbox[2]) < 3):
+                        extras.append(ms_next)
+                        attached.add(gj)
+                    else:
+                        break
+                if extras:
+                    ms_cur._attached_spans = [e for e in extras if e.text.strip()]
+
             # Render: stacked spans at same x, sequential spans advance x
             frac_x_start = None
             frac_max_width = 0
             for gi, ms in enumerate(group):
+                if gi in attached:
+                    continue
                 math_rect = pymupdf.Rect(ms.bbox)
                 if math_rect.is_empty or math_rect.width < 0.5:
                     continue
@@ -454,35 +490,46 @@ def _map_math_text(text: str, font_prefix: str) -> str:
 
 
 def _copy_original_glyph(page, orig_page, ms: Span, x: float,
-                         baseline_y: float) -> float:
+                         baseline_y: float,
+                         extra_spans: list[Span] | None = None) -> float:
     """Copy a glyph from the original page to preserve its exact appearance.
 
     Used for fonts like rsfs and EUFM where pymupdf can't render the Unicode
     equivalents via insert_text (supplementary plane limitation).
+
+    If extra_spans is provided, the source/dest rects are expanded to include
+    those spans (e.g. superscripts attached to a script letter like C^r).
     """
     orig_rect = pymupdf.Rect(ms.bbox)
     if orig_rect.is_empty or orig_rect.width < 0.5:
         return 0
+
+    # Expand rect to include any attached spans (superscripts, subscripts)
+    combined_rect = pymupdf.Rect(orig_rect)
+    if extra_spans:
+        for es in extra_spans:
+            combined_rect |= pymupdf.Rect(es.bbox)
 
     # Add padding to avoid clipping glyph edges (especially cursive ascenders)
     pad_x = 1.5
     pad_top = 2.5  # extra for ascenders/flourishes
     pad_bot = 1.5
     src_rect = pymupdf.Rect(
-        orig_rect.x0 - pad_x, orig_rect.y0 - pad_top,
-        orig_rect.x1 + pad_x, orig_rect.y1 + pad_bot,
+        combined_rect.x0 - pad_x, combined_rect.y0 - pad_top,
+        combined_rect.x1 + pad_x, combined_rect.y1 + pad_bot,
     )
 
     # Calculate destination rectangle preserving size (with matching padding)
-    y_offset = ms.bbox[1] - baseline_y
+    y_offset = combined_rect.y0 - baseline_y
     dst_rect = pymupdf.Rect(
         x - pad_x, baseline_y + y_offset - pad_top,
-        x + orig_rect.width + pad_x, baseline_y + y_offset + orig_rect.height + pad_bot,
+        x + combined_rect.width + pad_x,
+        baseline_y + y_offset + combined_rect.height + pad_bot,
     )
 
     # Copy from original page
     page.show_pdf_page(dst_rect, orig_page.parent, orig_page.number, clip=src_rect)
-    return orig_rect.width
+    return combined_rect.width
 
 
 def _render_math_span(page, orig_page, ms: Span, x: float,
@@ -498,7 +545,8 @@ def _render_math_span(page, orig_page, ms: Span, x: float,
     # For rsfs (script) and EUFM (fraktur) fonts, copy the original glyph
     # because pymupdf can't render supplementary plane Unicode via insert_text
     if prefix in ("rsfs", "EUFM") and ms.text.strip():
-        return _copy_original_glyph(page, orig_page, ms, x, baseline_y)
+        return _copy_original_glyph(page, orig_page, ms, x, baseline_y,
+                                    extra_spans=getattr(ms, '_attached_spans', None))
 
     # For CMEX characters not in the mapping, copy from original
     if prefix == "CMEX" and any(ch not in CMEX_CHAR_MAP for ch in ms.text if ch.strip()):
