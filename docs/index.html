@@ -839,7 +839,13 @@
       // Store original drop zone HTML for reset
       const originalDropHTML = dropZone.innerHTML;
 
-      browseBtn.addEventListener("click", () => fileInput.click());
+      browseBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        fileInput.click();
+      });
+      dropZone.addEventListener("click", () => {
+        if (!dropZone.classList.contains("processing")) fileInput.click();
+      });
 
       ["dragenter", "dragover"].forEach((evt) => {
         dropZone.addEventListener(evt, (e) => {
