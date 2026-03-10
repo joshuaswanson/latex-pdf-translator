@@ -127,6 +127,47 @@
         text-underline-offset: 2px;
       }
 
+      /* --- Beta corner badge --- */
+      .beta-badge {
+        position: fixed;
+        top: 0;
+        right: 0;
+        z-index: 1000;
+        overflow: hidden;
+        width: 120px;
+        height: 120px;
+        pointer-events: none;
+      }
+
+      .beta-badge a {
+        pointer-events: auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.3rem;
+        position: absolute;
+        top: 28px;
+        right: -32px;
+        width: 170px;
+        padding: 0.35rem 0;
+        background: var(--accent);
+        color: white;
+        font-family: var(--mono);
+        font-size: 0.75rem;
+        font-weight: 500;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        text-decoration: none;
+        transform: rotate(45deg);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+      }
+
+      .beta-badge svg {
+        width: 14px;
+        height: 14px;
+        fill: white;
+      }
+
       /* --- Decorative math floats --- */
       .math-float {
         position: absolute;
@@ -588,6 +629,16 @@
     </style>
   </head>
   <body>
+    <div class="beta-badge">
+      <a href="https://github.com/joshuaswanson/latex-pdf-translator/issues">
+        <svg viewBox="0 0 24 24">
+          <path
+            d="M6 22a2 2 0 01-2-2V7a1 1 0 011-1h1V4a2 2 0 012-2h8a2 2 0 012 2v2h1a1 1 0 011 1v13a2 2 0 01-2 2H6zm2-16h8V4H8v2zm-2 3v11h12V9H6zm4 2h4v2h-4v-2zm0 4h4v2h-4v-2z"
+          />
+        </svg>
+        Beta
+      </a>
+    </div>
     <div class="container">
       <header>
         <!--
