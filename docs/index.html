@@ -568,36 +568,6 @@
         text-underline-offset: 2px;
       }
 
-      /* --- Animations --- */
-      .fade-in {
-        opacity: 0;
-        transform: translateY(16px);
-        animation: fadeUp 0.6s ease forwards;
-      }
-
-      @keyframes fadeUp {
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-
-      .fade-in:nth-child(1) {
-        animation-delay: 0.05s;
-      }
-      .fade-in:nth-child(2) {
-        animation-delay: 0.12s;
-      }
-      .fade-in:nth-child(3) {
-        animation-delay: 0.19s;
-      }
-      .fade-in:nth-child(4) {
-        animation-delay: 0.26s;
-      }
-      .fade-in:nth-child(5) {
-        animation-delay: 0.33s;
-      }
-
       /* --- Responsive --- */
       @media (max-width: 640px) {
         .container {
@@ -624,7 +594,7 @@
   </head>
   <body>
     <div class="container">
-      <header class="fade-in">
+      <header>
         <span class="math-float left"
           >&sum;<sub>n=0</sub><sup>&infin;</sup></span
         >
@@ -632,8 +602,8 @@
         <div class="header-rule"></div>
         <h1>LaTeX PDF <span>Translator</span></h1>
         <p class="subtitle">
-          Translate mathematical PDFs from French or German to English,
-          preserving every symbol as crisp vector text.
+          Translate mathematical PDFs from French or German to English. All math
+          notation stays as searchable vector text.
         </p>
         <p class="beta-note">
           This tool is in beta.
@@ -644,7 +614,7 @@
       </header>
 
       <!-- Translate -->
-      <section id="translate" class="fade-in">
+      <section id="translate">
         <div class="lang-row">
           <label for="sourceLang">Translate from</label>
           <select id="sourceLang">
@@ -683,7 +653,7 @@
       </section>
 
       <!-- How it works -->
-      <section id="how" class="fade-in">
+      <section id="how">
         <h2>How it works</h2>
         <p>
           The tool reads PDF text spans directly and classifies each one as
@@ -702,7 +672,7 @@
       </section>
 
       <!-- CLI -->
-      <section id="cli" class="fade-in">
+      <section id="cli">
         <h2>Command line</h2>
         <p>
           Clone the repo and run with
@@ -939,24 +909,6 @@
         d.textContent = str;
         return d.innerHTML;
       }
-
-      // Scroll-triggered fade-in
-      const observer = new IntersectionObserver(
-        (entries) => {
-          entries.forEach((e) => {
-            if (e.isIntersecting) {
-              e.target.style.animationPlayState = "running";
-              observer.unobserve(e.target);
-            }
-          });
-        },
-        { threshold: 0.1 },
-      );
-
-      document.querySelectorAll(".fade-in").forEach((el) => {
-        el.style.animationPlayState = "paused";
-        observer.observe(el);
-      });
     </script>
   </body>
 </html>
