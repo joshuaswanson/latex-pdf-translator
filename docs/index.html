@@ -413,7 +413,7 @@
       }
 
       .reset-link {
-        display: block;
+        display: inline-block;
         margin-top: 0.75rem;
         font-size: 0.95rem;
         color: var(--accent);
@@ -876,8 +876,13 @@
         e.stopPropagation();
         fileInput.click();
       });
-      dropZone.addEventListener("click", () => {
-        if (!dropZone.classList.contains("processing")) fileInput.click();
+      dropZone.addEventListener("click", (e) => {
+        if (e.target.closest("a, button")) return;
+        if (
+          !dropZone.classList.contains("processing") &&
+          !dropZone.classList.contains("done")
+        )
+          fileInput.click();
       });
 
       ["dragenter", "dragover"].forEach((evt) => {
