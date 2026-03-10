@@ -336,6 +336,25 @@
         }
       }
 
+      /* --- Progress bar --- */
+      .progress-bar {
+        width: 80%;
+        max-width: 300px;
+        height: 6px;
+        background: var(--rule-light);
+        border-radius: 3px;
+        margin: 1rem auto 0.75rem;
+        overflow: hidden;
+      }
+
+      .progress-fill {
+        height: 100%;
+        background: var(--accent);
+        border-radius: 3px;
+        transition: width 0.3s ease;
+        width: 0%;
+      }
+
       /* --- Download button --- */
       .download-btn {
         display: inline-block;
@@ -846,11 +865,20 @@
             const elapsed = Math.round((Date.now() - startTime) / 1000);
 
             if (data.status === "processing") {
+              let progressHtml = "";
+              if (data.progress && data.total) {
+                const pct = Math.round((data.progress / data.total) * 100);
+                progressHtml =
+                  '<div class="progress-bar"><div class="progress-fill" style="width:' +
+                  pct +
+                  '%"></div></div>';
+              }
               dropZone.innerHTML =
                 '<div class="spinner"></div>' +
                 "<h3>" +
                 data.stage +
                 "</h3>" +
+                progressHtml +
                 '<p style="color: var(--ink-faint)">' +
                 elapsed +
                 "s elapsed</p>";

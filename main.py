@@ -44,8 +44,14 @@ def main():
     # Step 2: Translate (with disk cache for fast re-runs)
     cache_path = Path(input_path).with_suffix(".cache.json")
     print("\nTranslating via Google Translate...")
+
+    def print_progress(completed, total):
+        print(f"  {completed}/{total} groups translated", end="\r")
+
     translations = translate_lines(lines, cache_path=cache_path,
-                                    source=source_lang, target=target_lang)
+                                    source=source_lang, target=target_lang,
+                                    progress_callback=print_progress)
+    print()  # newline after \r progress
 
     # Step 3: Render
     print("\nRendering translations...")

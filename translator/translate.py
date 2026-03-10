@@ -219,7 +219,8 @@ def _save_cache(cache_path: Path, cache: dict):
 def translate_lines(lines: list[TranslatableLine],
                     cache_path: Path | None = None,
                     source: str = 'fr',
-                    target: str = 'en') -> list[str]:
+                    target: str = 'en',
+                    progress_callback=None) -> list[str]:
     """Translate all lines via Google Translate (free).
 
     Groups consecutive body-text lines into paragraphs for better translation
@@ -265,6 +266,8 @@ def translate_lines(lines: list[TranslatableLine],
     # Translate uncached in batches with retry
     batch = []
     batch_len = 0
+    completed = 0
+    total_to_translate = len(to_translate)
 
     for i, text, cache_key in to_translate:
         batch.append((i, text, cache_key))
@@ -292,6 +295,10 @@ def translate_lines(lines: list[TranslatableLine],
                     result = batch_texts[idx - batch[0][0]]
                 translated_groups.append((idx, result))
                 cache[ck] = result
+
+            completed += len(batch)
+            if progress_callback:
+                progress_callback(completed, total_to_translate)
 
             batch = []
             batch_len = 0

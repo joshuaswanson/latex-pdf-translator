@@ -35,6 +35,8 @@ MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 class Job:
     status: str = "processing"
     stage: str = "Starting..."
+    progress: int = 0
+    total: int = 0
     result: bytes | None = None
     error: str | None = None
     created: float = field(default_factory=time)
@@ -68,9 +70,16 @@ def _run_pipeline(job_id: str, pdf_bytes: bytes, source: str, target: str):
             job.error = "No translatable text found in this PDF."
             return
 
+        job.total = len(lines)
         job.stage = f"Translating {len(lines)} lines..."
+
+        def on_progress(completed, total):
+            job.progress = completed
+            job.stage = f"Translating... ({completed}/{total})"
+
         translations = translate_lines(lines, cache_path=None,
-                                       source=source, target=target)
+                                       source=source, target=target,
+                                       progress_callback=on_progress)
 
         job.stage = "Rendering translated PDF..."
         annot_colors, rendered_extents, link_texts = render_all(
@@ -134,6 +143,9 @@ async def get_status(job_id: str):
         raise HTTPException(404, "Job not found.")
     job = jobs[job_id]
     resp = {"status": job.status, "stage": job.stage}
+    if job.total > 0:
+        resp["progress"] = job.progress
+        resp["total"] = job.total
     if job.error:
         resp["error"] = job.error
     return resp
