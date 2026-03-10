@@ -930,7 +930,7 @@
 
             if (data.status === "processing") {
               let progressHtml = "";
-              if (data.progress && data.total) {
+              if (data.total > 0) {
                 const pct = Math.round((data.progress / data.total) * 100);
                 progressHtml =
                   '<div class="progress-bar"><div class="progress-fill" style="width:' +

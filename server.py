@@ -70,11 +70,11 @@ def _run_pipeline(job_id: str, pdf_bytes: bytes, source: str, target: str):
             job.error = "No translatable text found in this PDF."
             return
 
-        job.total = len(lines)
         job.stage = f"Translating {len(lines)} lines..."
 
         def on_progress(completed, total):
             job.progress = completed
+            job.total = total
             job.stage = f"Translating... ({completed}/{total})"
 
         translations = translate_lines(lines, cache_path=None,
