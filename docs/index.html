@@ -119,7 +119,7 @@
         text-underline-offset: 2px;
       }
 
-      /* --- Decorative math float --- */
+      /* --- Decorative math floats --- */
       .math-float {
         position: absolute;
         font-family: var(--serif);
@@ -127,19 +127,7 @@
         color: var(--rule);
         pointer-events: none;
         user-select: none;
-        font-size: 1.2rem;
-      }
-
-      .math-float.left {
-        left: -1rem;
-        top: 3rem;
-        transform: rotate(-8deg);
-        font-size: 1.05rem;
-      }
-      .math-float.right {
-        right: -0.5rem;
-        top: 5rem;
-        transform: rotate(5deg);
+        font-size: 1.1rem;
       }
 
       /* --- Sections --- */
@@ -595,10 +583,54 @@
   <body>
     <div class="container">
       <header>
-        <span class="math-float left"
-          >&sum;<sub>n=0</sub><sup>&infin;</sup></span
+        <span
+          class="math-float"
+          style="
+            left: -1rem;
+            top: 2rem;
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            line-height: 1;
+            font-size: 0.7rem;
+            gap: 0.1em;
+          "
+          ><span>&infin;</span><span style="font-size: 1.8em">&sum;</span
+          ><span>n=0</span></span
         >
-        <span class="math-float right">&part;f/&part;x</span>
+        <span class="math-float" style="right: 0; top: 2.5rem"
+          >&part;f/&part;x</span
+        >
+        <span
+          class="math-float"
+          style="left: 1rem; top: 7rem; font-size: 0.95rem"
+          >&alpha; + &beta;</span
+        >
+        <span
+          class="math-float"
+          style="right: 1.5rem; top: 7.5rem; font-size: 0.95rem"
+          >&int;</span
+        >
+        <span
+          class="math-float"
+          style="left: -0.5rem; top: 11rem; font-size: 1rem"
+          >&forall;&epsilon;&gt;0</span
+        >
+        <span
+          class="math-float"
+          style="right: -0.5rem; top: 11.5rem; font-size: 0.9rem"
+          >&nabla;f</span
+        >
+        <span
+          class="math-float"
+          style="left: 3rem; top: 5rem; font-size: 0.9rem"
+          >&xi;</span
+        >
+        <span
+          class="math-float"
+          style="right: 3rem; top: 5rem; font-size: 0.9rem"
+          >&infin;</span
+        >
         <div class="header-rule"></div>
         <h1>LaTeX PDF <span>Translator</span></h1>
         <p class="subtitle">
