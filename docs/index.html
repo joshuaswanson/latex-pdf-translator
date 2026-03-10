@@ -860,6 +860,16 @@
           file.name +
           "</p>";
 
+        // If upload takes >5s, server is probably waking up
+        const coldStartTimer = setTimeout(() => {
+          if (dropZone.classList.contains("processing")) {
+            dropZone.innerHTML =
+              '<div class="spinner"></div>' +
+              "<h3>Waking up the server...</h3>" +
+              '<p style="color: var(--ink-faint)">This can take up to a minute on the first request.</p>';
+          }
+        }, 5000);
+
         const formData = new FormData();
         formData.append("file", file);
 
@@ -874,6 +884,8 @@
             { method: "POST", body: formData },
           );
 
+          clearTimeout(coldStartTimer);
+
           if (!res.ok) {
             const err = await res
               .json()
@@ -884,6 +896,7 @@
           const { job_id } = await res.json();
           pollStatus(job_id, file.name);
         } catch (e) {
+          clearTimeout(coldStartTimer);
           showError(e.message);
         }
       }
