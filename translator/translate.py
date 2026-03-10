@@ -269,6 +269,9 @@ def translate_lines(lines: list[TranslatableLine],
     completed = 0
     total_to_translate = len(to_translate)
 
+    if progress_callback and total_to_translate > 0:
+        progress_callback(0, total_to_translate)
+
     for i, text, cache_key in to_translate:
         batch.append((i, text, cache_key))
         batch_len += len(text)
