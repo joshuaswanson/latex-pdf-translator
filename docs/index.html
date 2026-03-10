@@ -590,108 +590,77 @@
   <body>
     <div class="container">
       <header>
-        <!-- Decorative math symbols (KaTeX, Computer Modern font) -->
-        <!-- Left column -->
+        <!--
+          Decorative math symbols (KaTeX).
+          Layout: 6 rows, 2.5rem apart, one symbol per side per row.
+          Horizontal positions alternate: edge (~-2rem) and inset (~4rem).
+          Large symbols (sum, prod, int, frac) on edge rows with extra space.
+        -->
+        <!-- Row 1: top 1rem — large display operators on edges -->
         <span
           class="math-float"
-          style="left: -3rem; top: 1rem; font-size: 2rem"
+          style="left: -2.5rem; top: 1rem; font-size: 2rem"
           data-tex="\displaystyle\sum_{n=0}^{\infty}"
         ></span>
         <span
           class="math-float"
-          style="left: 5rem; top: 2rem; font-size: 1.5rem"
-          data-tex="\otimes"
+          style="right: -1.5rem; top: 1rem; font-size: 2rem"
+          data-tex="\dfrac{\partial f}{\partial x}"
         ></span>
+        <!-- Row 2: top 4rem — small symbols, inset -->
         <span
           class="math-float"
-          style="left: 1rem; top: 5.5rem; font-size: 1.7rem"
+          style="left: 4rem; top: 4rem; font-size: 1.6rem"
           data-tex="\xi"
         ></span>
         <span
           class="math-float"
-          style="left: 6rem; top: 7rem; font-size: 1.6rem"
-          data-tex="\mathbb{R}^n"
-        ></span>
-        <span
-          class="math-float"
-          style="left: -1.5rem; top: 9rem; font-size: 1.8rem"
-          data-tex="\displaystyle\prod_{i=1}^{n}"
-        ></span>
-        <span
-          class="math-float"
-          style="left: 4rem; top: 11rem; font-size: 1.5rem"
-          data-tex="\mathrm{d}x"
-        ></span>
-        <span
-          class="math-float"
-          style="left: -2rem; top: 13rem; font-size: 1.7rem"
-          data-tex="\forall\,\varepsilon > 0"
-        ></span>
-        <span
-          class="math-float"
-          style="left: 3rem; top: 15rem; font-size: 1.5rem"
-          data-tex="\Gamma(s)"
-        ></span>
-        <span
-          class="math-float"
-          style="left: -0.5rem; top: 17rem; font-size: 1.6rem"
-          data-tex="\lambda"
-        ></span>
-        <!-- Right column -->
-        <span
-          class="math-float"
-          style="right: -2rem; top: 1rem; font-size: 2rem"
-          data-tex="\dfrac{\partial f}{\partial x}"
-        ></span>
-        <span
-          class="math-float"
-          style="right: 5.5rem; top: 2.5rem; font-size: 1.8rem"
+          style="right: 4.5rem; top: 4rem; font-size: 1.7rem"
           data-tex="\sqrt{x}"
         ></span>
+        <!-- Row 3: top 6.5rem — medium expressions, edge -->
         <span
           class="math-float"
-          style="right: 0.5rem; top: 5.5rem; font-size: 1.7rem"
-          data-tex="\infty"
-        ></span>
-        <span
-          class="math-float"
-          style="right: 5rem; top: 7.5rem; font-size: 1.5rem"
-          data-tex="\langle \cdot \rangle"
-        ></span>
-        <span
-          class="math-float"
-          style="right: -1rem; top: 9.5rem; font-size: 2.5rem"
-          data-tex="\displaystyle\int_0^1"
-        ></span>
-        <span
-          class="math-float"
-          style="right: 4rem; top: 11.5rem; font-size: 1.6rem"
-          data-tex="\in"
-        ></span>
-        <span
-          class="math-float"
-          style="right: -1.5rem; top: 13.5rem; font-size: 1.8rem"
-          data-tex="\nabla f"
-        ></span>
-        <span
-          class="math-float"
-          style="right: 3.5rem; top: 15.5rem; font-size: 1.6rem"
-          data-tex="\cong"
-        ></span>
-        <span
-          class="math-float"
-          style="right: -0.5rem; top: 17.5rem; font-size: 1.6rem"
-          data-tex="\mathscr{L}"
-        ></span>
-        <span
-          class="math-float"
-          style="left: 1.5rem; top: 8rem; font-size: 1.8rem"
+          style="left: 0rem; top: 6.5rem; font-size: 1.7rem"
           data-tex="\alpha + \beta"
         ></span>
         <span
           class="math-float"
-          style="right: 0rem; top: 17rem; font-size: 1.7rem"
-          data-tex="\pi"
+          style="right: 0rem; top: 6.5rem; font-size: 1.6rem"
+          data-tex="\infty"
+        ></span>
+        <!-- Row 4: top 9rem — small symbols, inset -->
+        <span
+          class="math-float"
+          style="left: 3rem; top: 9rem; font-size: 1.6rem"
+          data-tex="\mathbb{R}^n"
+        ></span>
+        <span
+          class="math-float"
+          style="right: 3.5rem; top: 9rem; font-size: 1.6rem"
+          data-tex="\nabla f"
+        ></span>
+        <!-- Row 5: top 11.5rem — large display operators, edge -->
+        <span
+          class="math-float"
+          style="left: -1.5rem; top: 11.5rem; font-size: 1.8rem"
+          data-tex="\displaystyle\prod_{i=1}^{n}"
+        ></span>
+        <span
+          class="math-float"
+          style="right: -1rem; top: 11.5rem; font-size: 2.2rem"
+          data-tex="\displaystyle\int_0^1"
+        ></span>
+        <!-- Row 6: top 14.5rem — medium expressions, inset -->
+        <span
+          class="math-float"
+          style="left: 3.5rem; top: 14.5rem; font-size: 1.5rem"
+          data-tex="\Gamma(s)"
+        ></span>
+        <span
+          class="math-float"
+          style="right: 3rem; top: 14.5rem; font-size: 1.5rem"
+          data-tex="\cong"
         ></span>
         <div class="header-rule"></div>
         <h1>LaTeX PDF <span>Translator</span></h1>
