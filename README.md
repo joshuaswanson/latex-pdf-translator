@@ -21,6 +21,8 @@ Key features:
 
 **[Try it online](https://joshuaswanson.github.io/latex-pdf-translator/)** | [Buy me a coffee](https://buymeacoffee.com/swanson)
 
+<img src="assets/bmc_qr.png" alt="Buy Me a Coffee QR" width="200">
+
 ## Usage
 
 ```bash
