@@ -1,6 +1,7 @@
 """FastAPI server for translating PDFs via the web UI."""
 
 import threading
+import traceback
 import uuid
 from dataclasses import dataclass, field
 from time import time
@@ -107,9 +108,11 @@ def _run_pipeline(job_id: str, pdf_bytes: bytes, source: str, target: str):
         job.result = result_bytes
         job.status = "done"
 
-    except Exception as e:
+    except Exception:
+        # Log the real error server-side, but don't expose internals to clients.
+        traceback.print_exc()
         job.status = "error"
-        job.error = str(e)
+        job.error = "Translation failed. Please try again."
 
     finally:
         with lock:
