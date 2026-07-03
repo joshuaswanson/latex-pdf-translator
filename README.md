@@ -1,6 +1,6 @@
 # latex-pdf-translator
 
-Translate math LaTeX PDFs to English from any language while preserving all mathematical notation as crisp vector text.
+Translates LaTeX-typeset PDFs to English while preserving mathematical notation.
 
 ## How it works
 
