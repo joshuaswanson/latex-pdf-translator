@@ -280,6 +280,7 @@ def translate_lines(lines: list[TranslatableLine],
             batch_texts = [t for _, t, _ in batch]
             results = None
 
+            batch_failed = False
             for attempt in range(3):
                 try:
                     results = translator.translate_batch(batch_texts)
@@ -292,10 +293,15 @@ def translate_lines(lines: list[TranslatableLine],
                     else:
                         print(f"    WARNING: translation failed after 3 attempts: {e}")
                         results = batch_texts
+                        batch_failed = True
 
             for (idx, _orig, ck), result in zip(batch, results):
-                if result is None:
-                    result = batch_texts[idx - batch[0][0]]
+                # On failure (whole batch or an individual None result) fall back
+                # to the untranslated original, but do NOT cache it, so the line
+                # is retried on the next run instead of being poisoned.
+                if batch_failed or result is None:
+                    translated_groups.append((idx, result if result is not None else _orig))
+                    continue
                 translated_groups.append((idx, result))
                 cache[ck] = result
 
