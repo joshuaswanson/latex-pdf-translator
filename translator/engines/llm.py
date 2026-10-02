@@ -2,7 +2,8 @@
 
 Each request sends a JSON list of templates and asks for a JSON object with
 one translation per template. A translation whose placeholders differ from its
-template is retried on its own, then given up on.
+template is retried on its own with the required placeholders spelled out,
+then given up on.
 """
 
 import asyncio
@@ -37,7 +38,7 @@ class LLMEngine(Engine):
     def cache_id(self) -> str:
         return f"{self.name}:{self.model}"
 
-    def instructions(self) -> str:
+    def instructions(self, note: str = "") -> str:
         source, target = language_name(self.source), language_name(self.target)
         return (
             f"You translate excerpts of a {source} mathematics paper into {target}. "
@@ -47,21 +48,24 @@ class LLMEngine(Engine):
             "Tokens of the form {M0}, {M1}, ... stand for mathematical formulas: copy every "
             "token exactly once and unchanged, placed where the formula belongs in the "
             "translated sentence. Keep numbering, labels, and citations such as [12]. "
-            f"Use standard {target} mathematical terminology."
-        )
+            f"Use standard {target} mathematical terminology. {note}"
+        ).rstrip()
 
     def translate_batch(self, texts):
         results = self._complete_checked(texts)
         out = []
         for text, result in zip(texts, results):
-            if result is None and len(texts) > 1:
-                result = self._complete_checked([text])[0]
+            if result is None:
+                tokens = ", ".join(placeholders(text))
+                note = (f"The translation must contain each of these tokens exactly once: {tokens}."
+                        if tokens else "")
+                result = self._complete_checked([text], note)[0]
             out.append(result)
         return out
 
-    def _complete_checked(self, texts: list[str]) -> list[str | None]:
+    def _complete_checked(self, texts: list[str], note: str = "") -> list[str | None]:
         """Translations with missing or altered placeholders replaced by None."""
-        translations = self.complete(texts)
+        translations = self.complete(texts, note)
         if translations is None or len(translations) != len(texts):
             return [None] * len(texts)
         return [
@@ -69,8 +73,11 @@ class LLMEngine(Engine):
             for text, t in zip(texts, translations)
         ]
 
-    def complete(self, texts: list[str]) -> Sequence[str | None] | None:
-        """One model request. Returns None when the response is unusable."""
+    def complete(self, texts: list[str], note: str = "") -> Sequence[str | None] | None:
+        """One model request, with `note` appended to the instructions.
+
+        Returns None when the response is unusable.
+        """
         raise NotImplementedError
 
 
@@ -96,7 +103,7 @@ class ClaudeEngine(LLMEngine):
         except anthropic.AnthropicError:
             raise EngineError("No Anthropic credentials found. Set ANTHROPIC_API_KEY.")
 
-    def complete(self, texts):
+    def complete(self, texts, note=""):
         anthropic = self._anthropic
         output_config: dict = {"format": {"type": "json_schema", "schema": TRANSLATIONS_SCHEMA}}
         if "haiku" not in self.model:
@@ -104,7 +111,7 @@ class ClaudeEngine(LLMEngine):
         request = dict(
             model=self.model,
             max_tokens=16000,
-            system=self.instructions(),
+            system=self.instructions(note),
             messages=[{"role": "user", "content": json.dumps(texts, ensure_ascii=False)}],
             output_config=output_config,
         )
@@ -135,9 +142,9 @@ class GeminiEngine(LLMEngine):
     requires_key = True
     default_model = "gemini-3.5-flash-lite"
 
-    def complete(self, texts):
+    def complete(self, texts, note=""):
         body = {
-            "systemInstruction": {"parts": [{"text": self.instructions()}]},
+            "systemInstruction": {"parts": [{"text": self.instructions(note)}]},
             "contents": [{"role": "user",
                           "parts": [{"text": json.dumps(texts, ensure_ascii=False)}]}],
             "generationConfig": {
@@ -161,7 +168,7 @@ class OllamaEngine(LLMEngine):
     default_model = "qwen2.5:14b"
     max_batch_chars = 4000
 
-    def complete(self, texts):
+    def complete(self, texts, note=""):
         host = (self.host or "http://localhost:11434").rstrip("/")
         body = {
             "model": self.model,
@@ -170,7 +177,7 @@ class OllamaEngine(LLMEngine):
             # Ollama's default context window is too small for a batch and its translation
             "options": {"temperature": 0, "num_ctx": 8192},
             "messages": [
-                {"role": "system", "content": self.instructions()},
+                {"role": "system", "content": self.instructions(note)},
                 {"role": "user", "content": json.dumps(texts, ensure_ascii=False)},
             ],
         }
@@ -221,12 +228,12 @@ class AppleEngine(LLMEngine):
             self._schemas[count] = Translations
         return self._schemas[count]
 
-    def complete(self, texts):
-        return asyncio.run(self._respond(texts))
+    def complete(self, texts, note=""):
+        return asyncio.run(self._respond(texts, note))
 
-    async def _respond(self, texts: list[str]) -> list[str] | None:
+    async def _respond(self, texts: list[str], note: str) -> list[str] | None:
         fm = self._fm
-        session = fm.LanguageModelSession(instructions=self.instructions(),
+        session = fm.LanguageModelSession(instructions=self.instructions(note),
                                           model=self._system_model)
         try:
             result = await session.respond(json.dumps(texts, ensure_ascii=False),

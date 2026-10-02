@@ -113,9 +113,11 @@ class ScriptedLLM(LLMEngine):
         super().__init__("fr", "en")
         self.responses = list(responses)
         self.requests = []
+        self.notes = []
 
-    def complete(self, texts):
+    def complete(self, texts, note=""):
         self.requests.append(texts)
+        self.notes.append(note)
         return self.responses.pop(0)
 
 
@@ -129,6 +131,14 @@ def test_llm_retries_items_with_broken_placeholders_individually():
 
     assert result == ["Let {M0} be", "then {M1} holds", "and {M1} {M2}"]
     assert engine.requests[1] == ["alors {M1} vaut"]
+
+
+def test_llm_retry_names_the_required_placeholders():
+    engine = ScriptedLLM([["dropped"], ["then {M1} and {M0}"]])
+
+    assert engine.translate_batch(["alors {M0} et {M1}"]) == ["then {M1} and {M0}"]
+    assert engine.notes == ["", "The translation must contain each of these tokens "
+                                "exactly once: {M0}, {M1}."]
 
 
 def test_llm_gives_up_on_items_that_stay_broken():
