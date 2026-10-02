@@ -25,3 +25,6 @@ sfrm1000.pfa
 
 # Test artifacts
 .pytest_cache/
+
+# Credentials
+.env
