@@ -22,3 +22,6 @@ sfrm1000.pfa
 
 # Claude
 .claude/
+
+# Test artifacts
+.pytest_cache/
