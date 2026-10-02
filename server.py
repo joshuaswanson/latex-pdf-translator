@@ -3,17 +3,14 @@
 import threading
 import traceback
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from time import time
 
-import pymupdf
 from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from translator.extract import extract_lines
-from translator.translate import translate_lines
-from translator.render import render_all, _fix_link_annotations
+from translator.pipeline import NoTranslatableTextError, translate_pdf
 
 app = FastAPI()
 
@@ -30,6 +27,13 @@ app.add_middleware(
 
 MAX_CONCURRENT = 2
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+JOB_TTL_SECONDS = 600
+
+STAGE_LABELS = {
+    "extract": "Extracting text",
+    "translate": "Translating",
+    "render": "Rendering",
+}
 
 
 @dataclass
@@ -40,7 +44,7 @@ class Job:
     total: int = 0
     result: bytes | None = None
     error: str | None = None
-    created: float = field(default_factory=time)
+    finished: float | None = None
     filename: str = ""
 
 
@@ -50,9 +54,10 @@ lock = threading.Lock()
 
 
 def _cleanup_old_jobs():
-    """Remove jobs older than 10 minutes."""
+    """Remove jobs that finished more than JOB_TTL_SECONDS ago."""
     now = time()
-    expired = [jid for jid, j in jobs.items() if now - j.created > 600]
+    expired = [jid for jid, j in jobs.items()
+               if j.finished is not None and now - j.finished > JOB_TTL_SECONDS]
     for jid in expired:
         del jobs[jid]
 
@@ -60,73 +65,38 @@ def _cleanup_old_jobs():
 def _run_pipeline(job_id: str, pdf_bytes: bytes, source: str, target: str):
     global active_count
     job = jobs[job_id]
+
+    def on_progress(stage, completed, total):
+        label = STAGE_LABELS[stage]
+        job.progress = completed
+        job.total = total
+        job.stage = f"{label}... ({completed}/{total})" if total else f"{label}..."
+
     try:
-        job.stage = "Extracting text..."
-        orig_doc = pymupdf.open("pdf", pdf_bytes)
-        work_doc = pymupdf.open("pdf", pdf_bytes)
-
-        lines = extract_lines(orig_doc)
-        if not lines:
-            job.status = "error"
-            job.error = "No translatable text found in this PDF."
-            return
-
-        job.stage = f"Translating {len(lines)} lines..."
-
-        def on_progress(completed, total):
-            job.progress = completed
-            job.total = total
-            job.stage = f"Translating... ({completed}/{total})"
-
-        translations = translate_lines(lines, cache_path=None,
-                                       source=source, target=target,
-                                       progress_callback=on_progress)
-
-        job.stage = "Rendering translated PDF..."
-        job.progress = 0
-        job.total = 0
-
-        def on_render_progress(completed, total):
-            job.progress = completed
-            job.total = total
-            job.stage = f"Rendering... ({completed}/{total} pages)"
-
-        annot_colors, rendered_extents, link_texts = render_all(
-            work_doc, orig_doc, lines, translations,
-            progress_callback=on_render_progress
-        )
-
-        out_bytes = work_doc.tobytes(garbage=4, deflate=True)
-        work_doc.close()
-        orig_doc.close()
-
-        doc = pymupdf.open("pdf", out_bytes)
-        _fix_link_annotations(doc, annot_colors, rendered_extents, link_texts)
-        result_bytes = doc.tobytes(garbage=4, deflate=True)
-        doc.close()
-
-        job.result = result_bytes
+        job.result = translate_pdf(pdf_bytes, source, target, on_progress=on_progress)
         job.status = "done"
-
+    except NoTranslatableTextError as e:
+        job.status = "error"
+        job.error = str(e)
     except Exception:
         # Log the real error server-side, but don't expose internals to clients.
         traceback.print_exc()
         job.status = "error"
         job.error = "Translation failed. Please try again."
-
     finally:
+        job.finished = time()
         with lock:
             active_count -= 1
 
 
 @app.post("/translate")
-async def translate_pdf(file: UploadFile, source: str = "fr", target: str = "en"):
+async def start_translation(file: UploadFile, source: str = "fr", target: str = "en"):
     global active_count
 
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Please upload a PDF file.")
 
-    pdf_bytes = await file.read()
+    pdf_bytes = await file.read(MAX_FILE_SIZE + 1)
 
     if len(pdf_bytes) > MAX_FILE_SIZE:
         raise HTTPException(400, "File too large. Maximum size is 50 MB.")

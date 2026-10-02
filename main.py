@@ -1,21 +1,22 @@
-"""Translate a math LaTeX PDF to English.
+"""Translate a LaTeX-typeset PDF while preserving its mathematical notation.
 
-For each line in the PDF:
-1. Classify spans as text (translatable) or math (preserve)
-2. Build full line text with XXXM0XXX markers for math symbols
-3. Translate via Google Translate (free, handles word reordering naturally)
-4. Re-render: white-out original line, place translated text + math glyph images
+1. Classify PDF text spans as translatable text or math by their font
+2. Translate each line or paragraph via Google Translate, with XXXM0XXX
+   placeholders standing in for math
+3. Redact the original text and re-render the translation as vector text,
+   with math in Latin Modern Math
 """
 
 import argparse
-import sys
 from pathlib import Path
 
-import pymupdf
+from translator.pipeline import NoTranslatableTextError, translate_pdf
 
-from translator.extract import extract_lines
-from translator.translate import translate_lines
-from translator.render import render_all, _fix_link_annotations
+STAGE_MESSAGES = {
+    "extract": "Extracting translatable lines...",
+    "translate": "Translating via Google Translate...",
+    "render": "Rendering translations...",
+}
 
 
 def main():
@@ -25,48 +26,31 @@ def main():
     parser.add_argument("--target", "-t", default="en", help="Target language code (default: en)")
     args = parser.parse_args()
 
-    input_path = args.input
-    source_lang = args.source
-    target_lang = args.target
-
-    output_path = Path(input_path).stem + f"-{target_lang}.pdf"
+    input_path = Path(args.input)
+    output_path = input_path.with_name(f"{input_path.stem}-{args.target}.pdf")
     print(f"Input:  {input_path}")
     print(f"Output: {output_path}")
 
-    orig_doc = pymupdf.open(input_path)
-    work_doc = pymupdf.open(input_path)
+    current_stage = None
 
-    # Step 1: Extract
-    print("\nExtracting translatable lines...")
-    lines = extract_lines(orig_doc)
-    print(f"Found {len(lines)} translatable lines across {len(orig_doc)} pages")
+    def print_progress(stage, completed, total):
+        nonlocal current_stage
+        if stage != current_stage:
+            if current_stage == "translate":
+                print()  # newline after \r progress
+            print(f"\n{STAGE_MESSAGES[stage]}")
+            current_stage = stage
+        if stage == "translate" and total:
+            print(f"  {completed}/{total} groups translated", end="\r")
 
-    # Step 2: Translate (with disk cache for fast re-runs)
-    cache_path = Path(input_path).with_suffix(".cache.json")
-    print("\nTranslating via Google Translate...")
+    try:
+        result = translate_pdf(input_path.read_bytes(), args.source, args.target,
+                               cache_path=input_path.with_suffix(".cache.json"),
+                               on_progress=print_progress)
+    except NoTranslatableTextError as e:
+        raise SystemExit(str(e))
 
-    def print_progress(completed, total):
-        print(f"  {completed}/{total} groups translated", end="\r")
-
-    translations = translate_lines(lines, cache_path=cache_path,
-                                    source=source_lang, target=target_lang,
-                                    progress_callback=print_progress)
-    print()  # newline after \r progress
-
-    # Step 3: Render
-    print("\nRendering translations...")
-    annot_colors, rendered_extents, link_texts = render_all(work_doc, orig_doc, lines, translations)
-
-    # Save to bytes, reload, and fix link border colors
-    # (insert_link creates links with xref=0; need save/reload to get real xrefs)
-    pdf_bytes = work_doc.tobytes(garbage=4, deflate=True)
-    work_doc.close()
-    orig_doc.close()
-
-    doc = pymupdf.open("pdf", pdf_bytes)
-    _fix_link_annotations(doc, annot_colors, rendered_extents, link_texts)
-    doc.save(output_path, garbage=4, deflate=True)
-    doc.close()
+    output_path.write_bytes(result)
     print(f"\nSaved: {output_path}")
 
 
