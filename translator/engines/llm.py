@@ -47,7 +47,8 @@ class LLMEngine(Engine):
             "words between items, and return exactly one translation per item, in the same order. "
             "Tokens of the form {M0}, {M1}, ... stand for mathematical formulas: copy every "
             "token exactly once and unchanged, placed where the formula belongs in the "
-            "translated sentence. Keep numbering, labels, and citations such as [12]. "
+            "translated sentence. Leave proper names, numbering, labels, and citations "
+            "unchanged. "
             f"Use standard {target} mathematical terminology. {note}"
         ).rstrip()
 
