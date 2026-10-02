@@ -42,6 +42,9 @@ DOTLESS_TO_DOTTED = {"\u0131": "i", "\u0237": "j"}
 
 EXTENSION_FONT_RE = re.compile(r"CMEX|LMMathExtension")
 
+HYPHENATED_END_RE = re.compile(r"[^\W\d_]-$")
+CONTINUATION_RE = re.compile(r"([^\W\d_]+)\s*")
+
 BOLD_FONT_RE = re.compile(r"SFB[XI]|CMBX|-Bold")
 ITALIC_FONT_RE = re.compile(r"SF(?:BI|TI|SL)|CM(?:BX)?TI|CMSL|Italic|Slant")
 
@@ -477,7 +480,39 @@ def extract_lines(doc) -> list[TranslatableLine]:
                     # Prepend to the first math group
                     best_line.math_spans[0] = mo_spans + best_line.math_spans[0]
 
+    _join_hyphenated_words(result)
     return result
+
+
+def _join_hyphenated_words(lines: list[TranslatableLine]):
+    """Move the end of a word hyphenated across a line break up to the first line.
+
+    "le résultat prin-" / "cipal de cette section" becomes
+    "le résultat principal" / "de cette section", so each line holds whole words.
+    """
+    for line, following in zip(lines, lines[1:]):
+        if line.is_toc or following.is_toc or line.page_idx != following.page_idx:
+            continue
+        height = line.bbox[3] - line.bbox[1]
+        if not 0 < following.bbox[1] - line.bbox[1] <= 2 * height:
+            continue
+        match = CONTINUATION_RE.match(following.template)
+        if (not HYPHENATED_END_RE.search(line.template) or not match
+                or not match.group(1)[0].islower()):
+            continue
+        remainder = following.template[match.end():]
+        if not re.search(r"[^\W\d_]", remainder):
+            continue
+        fragment = match.group(1)
+        line.template = line.template[:-1] + fragment
+        following.template = remainder
+        line.text_styles[-1] = (line.text_styles[-1][0] + len(fragment) - 1,
+                                line.text_styles[-1][1])
+        first_count, first_style = following.text_styles[0]
+        if first_count > match.end():
+            following.text_styles[0] = (first_count - match.end(), first_style)
+        else:
+            del following.text_styles[0]
 
 
 def _column_right_edge(line_bbox, block_bbox, paragraph_bboxes) -> float:

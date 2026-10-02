@@ -68,3 +68,11 @@ def test_wordless_roman_spans_follow_their_neighbors():
     assert [s.is_text for s in spans] == [
         True, True, True, True, True, False, False, False, False, False,
     ]
+
+
+@pytest.mark.parametrize("variant", FONT_VARIANTS)
+def test_words_hyphenated_across_lines_are_joined(variant):
+    templates = [line.template for line in extract_lines(open_fixture(variant))]
+
+    assert templates[-2].endswith("le résultat principal")
+    assert templates[-1] == "de cette section."
