@@ -6,10 +6,11 @@ import uuid
 from dataclasses import dataclass
 from time import time
 
-from fastapi import FastAPI, UploadFile, HTTPException
+from fastapi import FastAPI, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
+from translator.engines import LOCAL_ENGINES, Engine, EngineError, create_engine
 from translator.pipeline import NoTranslatableTextError, translate_pdf
 
 app = FastAPI()
@@ -62,7 +63,7 @@ def _cleanup_old_jobs():
         del jobs[jid]
 
 
-def _run_pipeline(job_id: str, pdf_bytes: bytes, source: str, target: str):
+def _run_pipeline(job_id: str, pdf_bytes: bytes, engine: Engine):
     global active_count
     job = jobs[job_id]
 
@@ -73,9 +74,9 @@ def _run_pipeline(job_id: str, pdf_bytes: bytes, source: str, target: str):
         job.stage = f"{label}... ({completed}/{total})" if total else f"{label}..."
 
     try:
-        job.result = translate_pdf(pdf_bytes, source, target, on_progress=on_progress)
+        job.result = translate_pdf(pdf_bytes, engine, on_progress=on_progress)
         job.status = "done"
-    except NoTranslatableTextError as e:
+    except (NoTranslatableTextError, EngineError) as e:
         job.status = "error"
         job.error = str(e)
     except Exception:
@@ -90,11 +91,25 @@ def _run_pipeline(job_id: str, pdf_bytes: bytes, source: str, target: str):
 
 
 @app.post("/translate")
-async def start_translation(file: UploadFile, source: str = "fr", target: str = "en"):
+async def start_translation(file: UploadFile, source: str = "fr", target: str = "en",
+                            engine: str = Form("google"), api_key: str = Form(""),
+                            region: str = Form(""), model: str = Form("")):
+    """Start a translation job.
+
+    Credentials arrive as form fields, are used only for this job, and are
+    never stored or logged.
+    """
     global active_count
 
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Please upload a PDF file.")
+    if engine in LOCAL_ENGINES:
+        raise HTTPException(400, f"The {engine} engine runs only in the command-line tool.")
+    try:
+        translation_engine = create_engine(engine, source, target, api_key=api_key or None,
+                                           region=region or None, model=model or None)
+    except EngineError as e:
+        raise HTTPException(400, str(e))
 
     pdf_bytes = await file.read(MAX_FILE_SIZE + 1)
 
@@ -112,7 +127,7 @@ async def start_translation(file: UploadFile, source: str = "fr", target: str = 
     jobs[job_id] = Job(filename=file.filename)
 
     thread = threading.Thread(target=_run_pipeline,
-                              args=(job_id, pdf_bytes, source, target),
+                              args=(job_id, pdf_bytes, translation_engine),
                               daemon=True)
     thread.start()
 
