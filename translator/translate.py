@@ -5,24 +5,18 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from deep_translator import GoogleTranslator
-
 from translator.charmap import TERM_FIXES
+from translator.engines import ENGLISH_CODES, Engine, EngineError, RateLimitedError
 from translator.extract import TranslatableLine, Span
 
 
 # Google Translate rejects requests of 5000 characters or more
 MAX_GROUP_CHARS = 4500
 MAX_ATTEMPTS = 3
+MAX_RETRY_WAIT = 60
 
 # Lines this much larger than the body text are treated as headings
 HEADING_SIZE_RATIO = 1.1
-
-# Math placeholder format: XXXM0XXX, XXXM1XXX, etc.
-# Google Translate preserves these as opaque tokens
-MATH_MARKER_RE = re.compile(r'XXXM(\d+)XXX', re.IGNORECASE)
-
-ENGLISH_CODES = {"en", "english"}
 
 TERM_FIX_PATTERNS = [
     (re.compile(rf"\b{pattern}", re.IGNORECASE), replacement)
@@ -30,22 +24,11 @@ TERM_FIX_PATTERNS = [
 ]
 
 
-def _prepare_gt_text(text: str) -> str:
-    """Convert a template string to Google Translate input."""
-    gt_text = re.sub(r'\{M(\d+)\}', r'XXXM\1XXX', text)
-    # Ensure spaces around markers so Google sees them as separate tokens
-    gt_text = re.sub('([a-zA-Z\u00C0-\u00ff])(XXXM\\d+XXX)', r'\1 \2', gt_text)
-    gt_text = re.sub('(XXXM\\d+XXX)([a-zA-Z\u00C0-\u00ff])', r'\1 \2', gt_text)
-    return gt_text
-
-
-def _postprocess_translation(text: str, target: str) -> str:
-    """Convert markers back and apply fixes to a translated string."""
-    text = MATH_MARKER_RE.sub(r'{M\1}', text)
-    # Clean up extra spaces around markers
+def _postprocess_translation(text: str, apply_term_fixes: bool) -> str:
+    """Normalize spacing around math placeholders and fix known terminology mistakes."""
     text = re.sub(r'\s+(\{M\d+\})\s+', r' \1 ', text)
     text = re.sub(r'\s+(\{M\d+\})-', r' \1-', text)
-    if target.lower() in ENGLISH_CODES:
+    if apply_term_fixes:
         text = _fix_terminology(text)
     return text
 
@@ -260,106 +243,119 @@ def _save_cache(cache_path: Path, cache: dict):
     cache_path.write_text(json.dumps(cache, ensure_ascii=False))
 
 
-def _cache_key(text: str, source: str, target: str) -> str:
-    return hashlib.md5(f"{source}:{target}:{text}".encode()).hexdigest()
+def _cache_key(engine: Engine, text: str) -> str:
+    key = f"{engine.cache_id}:{engine.source}:{engine.target}:{text}"
+    return hashlib.md5(key.encode()).hexdigest()
 
 
-def _translate_with_retry(translator: GoogleTranslator, text: str) -> str | None:
-    """Translate one string, returning None if every attempt fails."""
+def _batches(indices: list[int], texts: list[str], engine: Engine):
+    """Split indices into batches that respect the engine's request limits."""
+    batch, size = [], 0
+    for i in indices:
+        if batch and (len(batch) >= engine.max_batch_items
+                      or size + len(texts[i]) > engine.max_batch_chars):
+            yield batch
+            batch, size = [], 0
+        batch.append(i)
+        size += len(texts[i])
+    if batch:
+        yield batch
+
+
+def _translate_with_retry(engine: Engine, texts: list[str]) -> list[str | None]:
+    """Translate one batch, with None for texts that could not be translated.
+
+    Raises EngineError when the engine keeps rate limiting, so a blocked
+    service stops the run quickly.
+    """
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            return translator.translate(text)
+            return engine.translate_batch(texts)
+        except EngineError:
+            raise
+        except RateLimitedError as e:
+            if attempt == MAX_ATTEMPTS:
+                raise EngineError(f"{engine.label} is rate limiting requests. Try again later.")
+            wait = min(e.retry_after or 2 ** attempt, MAX_RETRY_WAIT)
+            reason = "rate limited"
         except Exception as e:
             if attempt == MAX_ATTEMPTS:
                 print(f"    WARNING: translation failed after {MAX_ATTEMPTS} attempts: {e}")
-                return None
+                return [None] * len(texts)
             wait = 2 ** attempt
-            print(f"    Retry {attempt}/{MAX_ATTEMPTS - 1} after {wait}s: {e}")
-            time.sleep(wait)
+            reason = str(e)
+        print(f"    Retry {attempt}/{MAX_ATTEMPTS - 1} after {wait:.0f}s: {reason}")
+        time.sleep(wait)
 
 
-def translate_lines(lines: list[TranslatableLine],
+def translate_lines(lines: list[TranslatableLine], engine: Engine,
                     cache_path: Path | None = None,
-                    source: str = 'fr',
-                    target: str = 'en',
                     progress_callback=None) -> list[str]:
-    """Translate all lines via Google Translate (free).
+    """Translate all lines with the given engine.
 
     Groups consecutive body-text lines into paragraphs for better translation
     quality, then splits results back to per-line for rendering.
     Uses a disk cache to avoid re-translating on subsequent runs.
     """
-    translator = GoogleTranslator(source=source, target=target)
     groups = _group_paragraphs(lines)
-
-    # Load translation cache
     cache = _load_cache(cache_path) if cache_path else {}
 
-    # Prepare paragraph texts
     group_texts = []
     group_math = []
     for group in groups:
         if len(group) == 1:
             line = lines[group[0]]
-            text = line.toc_content if line.is_toc else line.template
-            group_texts.append(_prepare_gt_text(text))
+            group_texts.append(line.toc_content if line.is_toc else line.template)
             group_math.append(line.math_spans)
         else:
             merged, merged_ms = _merge_paragraph_templates(lines, group)
-            group_texts.append(_prepare_gt_text(merged))
+            group_texts.append(merged)
             group_math.append(merged_ms)
 
-    # Separate cached vs uncached
-    to_translate = []  # (group_idx, text, cache_key)
-    translated_groups = []  # (group_idx, result)
+    keys = [_cache_key(engine, text) for text in group_texts]
+    translated = [cache.get(key) for key in keys]
+    pending = [i for i, t in enumerate(translated) if t is None]
 
-    for i, text in enumerate(group_texts):
-        cache_key = _cache_key(text, source, target)
-        if cache_key in cache:
-            translated_groups.append((i, cache[cache_key]))
-        else:
-            to_translate.append((i, text, cache_key))
-
-    if to_translate:
-        print(f"  {len(translated_groups)} cached, {len(to_translate)} to translate")
+    if pending:
+        print(f"  {len(groups) - len(pending)} cached, {len(pending)} to translate")
     else:
-        print(f"  All {len(translated_groups)} translations cached")
+        print(f"  All {len(groups)} translations cached")
 
-    if progress_callback and to_translate:
-        progress_callback(0, len(to_translate))
+    if progress_callback and pending:
+        progress_callback(0, len(pending))
 
-    for completed, (i, text, cache_key) in enumerate(to_translate, 1):
-        result = _translate_with_retry(translator, text)
-        if result is None:
-            # Fall back to the untranslated text without caching it, so the
-            # next run retries this group.
-            translated_groups.append((i, text))
-        else:
-            translated_groups.append((i, result))
-            cache[cache_key] = result
-        if progress_callback:
-            progress_callback(completed, len(to_translate))
+    completed = 0
+    try:
+        for batch in _batches(pending, group_texts, engine):
+            results = _translate_with_retry(engine, [group_texts[i] for i in batch])
+            for i, result in zip(batch, results):
+                if result is None:
+                    # Fall back to the untranslated text without caching it, so
+                    # the next run retries this group.
+                    translated[i] = group_texts[i]
+                else:
+                    translated[i] = result
+                    cache[keys[i]] = result
+            completed += len(batch)
+            if progress_callback:
+                progress_callback(completed, len(pending))
+    finally:
+        if cache_path:
+            _save_cache(cache_path, cache)
 
-    # Save updated cache
-    if cache_path:
-        _save_cache(cache_path, cache)
-
-    # Sort and postprocess
-    translated_groups.sort(key=lambda x: x[0])
+    apply_term_fixes = engine.apply_term_fixes and engine.target.lower() in ENGLISH_CODES
 
     # Split paragraph translations back to per-line
     translations = [""] * len(lines)
-    for (group_idx, translated_text), group in zip(translated_groups, groups):
-        processed = _postprocess_translation(translated_text, target)
+    for group_idx, (translated_text, group) in enumerate(zip(translated, groups)):
+        processed = _postprocess_translation(translated_text, apply_term_fixes)
 
         if len(group) == 1:
             translations[group[0]] = processed
         else:
-            # Split merged translation back to individual lines
             per_line = _split_translation(processed, lines, group,
                                           group_math[group_idx])
             for idx, text in zip(group, per_line):
                 translations[idx] = text
 
     return translations
-

@@ -1,10 +1,13 @@
+import json
+
 import pytest
 
+from conftest import FakeEngine
 from translator import translate
+from translator.engines import EngineError, RateLimitedError
 from translator.extract import Span, TranslatableLine
 from translator.translate import (
-    MAX_GROUP_CHARS, _fix_terminology, _group_paragraphs, _postprocess_translation,
-    translate_lines,
+    MAX_GROUP_CHARS, _fix_terminology, _group_paragraphs, translate_lines,
 )
 
 
@@ -40,8 +43,16 @@ def test_terminology_fixes(text, expected):
 
 
 def test_terminology_fixes_apply_only_to_english():
-    assert _postprocess_translation("Demonstration XXXM0XXX", "en") == "Proof {M0}"
-    assert _postprocess_translation("Demonstration XXXM0XXX", "es") == "Demonstration {M0}"
+    lines = [make_line("Démonstration de la proposition", y=100)]
+
+    class Literal(FakeEngine):
+        apply_term_fixes = True
+
+        def translate_batch(self, texts):
+            return ["Demonstration of the proposition" for _ in texts]
+
+    assert translate_lines(lines, Literal(target="en")) == ["Proof of the proposition"]
+    assert translate_lines(lines, Literal(target="es")) == ["Demonstration of the proposition"]
 
 
 def test_paragraph_groups_stay_under_request_limit():
@@ -54,34 +65,62 @@ def test_paragraph_groups_stay_under_request_limit():
         assert merged_len <= MAX_GROUP_CHARS
 
 
-def test_cache_is_keyed_by_language_pair(fake_translator, tmp_path):
+def test_cache_is_keyed_by_engine_and_language_pair(tmp_path):
     cache_path = tmp_path / "cache.json"
     lines = [make_line("Soit une fonction continue", y=100)]
+    english, spanish = FakeEngine(target="en"), FakeEngine(target="es")
 
-    translate_lines(lines, cache_path=cache_path, source="fr", target="en")
-    translate_lines(lines, cache_path=cache_path, source="fr", target="en")
-    translate_lines(lines, cache_path=cache_path, source="fr", target="es")
+    translate_lines(lines, english, cache_path=cache_path)
+    translate_lines(lines, english, cache_path=cache_path)
+    translate_lines(lines, spanish, cache_path=cache_path)
 
-    assert [(s, t) for s, t, _ in fake_translator.calls] == [("fr", "en"), ("fr", "es")]
+    assert len(english.batches) == 1
+    assert len(spanish.batches) == 1
+
+
+def test_requests_are_batched_within_engine_limits():
+    lines = [make_line(f"ligne {i}", y=100 + 30 * i) for i in range(25)]
+    engine = FakeEngine()
+
+    translate_lines(lines, engine)
+
+    assert [len(batch) for batch in engine.batches] == [10, 10, 5]
 
 
 def test_failed_translations_are_not_cached(monkeypatch, tmp_path):
-    class FailingTranslator:
-        def __init__(self, source, target):
-            pass
-
-        def translate(self, text):
+    class FailingEngine(FakeEngine):
+        def translate_batch(self, texts):
             raise ConnectionError("offline")
 
-    monkeypatch.setattr(translate, "GoogleTranslator", FailingTranslator)
     monkeypatch.setattr(translate.time, "sleep", lambda seconds: None)
     cache_path = tmp_path / "cache.json"
     lines = [make_line("Soit une fonction continue", y=100)]
 
-    result = translate_lines(lines, cache_path=cache_path, source="fr", target="en")
+    result = translate_lines(lines, FailingEngine(), cache_path=cache_path)
 
     assert result == ["Soit une fonction continue"]
     assert cache_path.read_text() == "{}"
+
+
+def test_rate_limiting_stops_the_run_and_keeps_finished_translations(monkeypatch, tmp_path):
+    class RateLimitedEngine(FakeEngine):
+        max_batch_items = 1
+
+        def translate_batch(self, texts):
+            if self.batches:
+                raise RateLimitedError()
+            return super().translate_batch(texts)
+
+    sleeps = []
+    monkeypatch.setattr(translate.time, "sleep", sleeps.append)
+    cache_path = tmp_path / "cache.json"
+    lines = [make_line(f"ligne {i}", y=100 + 30 * i) for i in range(5)]
+
+    with pytest.raises(EngineError, match="rate limiting"):
+        translate_lines(lines, RateLimitedEngine(), cache_path=cache_path)
+
+    assert len(sleeps) == translate.MAX_ATTEMPTS - 1
+    assert len(json.loads(cache_path.read_text())) == 1
 
 
 def test_body_text_in_12pt_documents_merges_into_paragraphs():

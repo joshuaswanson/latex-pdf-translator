@@ -2,9 +2,8 @@ import re
 from pathlib import Path
 
 import pymupdf
-import pytest
 
-from translator import translate
+from translator.engines import Engine
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -25,26 +24,23 @@ FRENCH_TO_ENGLISH = {
 }
 
 
-class FakeTranslator:
-    """Word-by-word stand-in for GoogleTranslator that records its calls."""
+class FakeEngine(Engine):
+    """Word-by-word stand-in for a translation engine that records its batches."""
 
-    calls: list[tuple[str, str, str]] = []
+    name = "fake"
+    label = "Fake"
+    max_batch_items = 10
+    max_batch_chars = 10000
 
-    def __init__(self, source, target):
-        self.source = source
-        self.target = target
+    def __init__(self, source="fr", target="en"):
+        super().__init__(source, target)
+        self.batches: list[list[str]] = []
 
-    def translate(self, text):
-        FakeTranslator.calls.append((self.source, self.target, text))
-        return re.sub(r"[^\W\d_][\w-]*",
-                      lambda m: FRENCH_TO_ENGLISH.get(m.group(0), m.group(0)), text)
-
-
-@pytest.fixture
-def fake_translator(monkeypatch):
-    FakeTranslator.calls = []
-    monkeypatch.setattr(translate, "GoogleTranslator", FakeTranslator)
-    return FakeTranslator
+    def translate_batch(self, texts):
+        self.batches.append(texts)
+        return [re.sub(r"[^\W\d_][\w-]*",
+                       lambda m: FRENCH_TO_ENGLISH.get(m.group(0), m.group(0)), text)
+                for text in texts]
 
 
 def fixture_pdf_bytes(variant: str) -> bytes:

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pymupdf
 
+from translator.engines import Engine
 from translator.extract import extract_lines
 from translator.render import fix_link_annotations, render_all
 from translator.translate import translate_lines
@@ -16,10 +17,14 @@ class NoTranslatableTextError(ValueError):
     pass
 
 
-def translate_pdf(pdf_bytes: bytes, source: str, target: str,
+def translate_pdf(pdf_bytes: bytes, engine: Engine,
                   cache_path: Path | None = None,
                   on_progress: ProgressCallback | None = None) -> bytes:
-    """Translate a LaTeX-typeset PDF, returning the translated PDF bytes."""
+    """Translate a LaTeX-typeset PDF, returning the translated PDF bytes.
+
+    Raises EngineError when the translation engine fails in a way the user
+    has to fix, such as a rejected API key.
+    """
     report = on_progress or (lambda stage, completed, total: None)
 
     with pymupdf.open("pdf", pdf_bytes) as orig_doc, pymupdf.open("pdf", pdf_bytes) as work_doc:
@@ -30,7 +35,7 @@ def translate_pdf(pdf_bytes: bytes, source: str, target: str,
 
         report("translate", 0, 0)
         translations = translate_lines(
-            lines, cache_path=cache_path, source=source, target=target,
+            lines, engine, cache_path=cache_path,
             progress_callback=lambda completed, total: report("translate", completed, total),
         )
         link_info = render_all(

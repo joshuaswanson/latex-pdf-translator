@@ -1,14 +1,14 @@
 import pymupdf
 import pytest
 
-from conftest import FONT_VARIANTS, fixture_pdf_bytes
+from conftest import FONT_VARIANTS, FakeEngine, fixture_pdf_bytes
 from translator.pipeline import NoTranslatableTextError, translate_pdf
 from translator.render import _find_extent
 
 
 @pytest.mark.parametrize("variant", FONT_VARIANTS)
-def test_translates_fixture_end_to_end(fake_translator, variant):
-    result = translate_pdf(fixture_pdf_bytes(variant), "fr", "en")
+def test_translates_fixture_end_to_end(variant):
+    result = translate_pdf(fixture_pdf_bytes(variant), FakeEngine())
 
     with pymupdf.open("pdf", result) as doc:
         text = doc[0].get_text()
@@ -19,24 +19,24 @@ def test_translates_fixture_end_to_end(fake_translator, variant):
 
 
 @pytest.mark.parametrize("variant", FONT_VARIANTS)
-def test_translated_text_stays_inside_the_text_block(fake_translator, variant):
+def test_translated_text_stays_inside_the_text_block(variant):
     with pymupdf.open("pdf", fixture_pdf_bytes(variant)) as doc:
         right_margin = max(b[2] for b in doc[0].get_text("blocks"))
 
-    result = translate_pdf(fixture_pdf_bytes(variant), "fr", "en")
+    result = translate_pdf(fixture_pdf_bytes(variant), FakeEngine())
 
     with pymupdf.open("pdf", result) as doc:
         words = doc[0].get_text("words")
     assert max(w[2] for w in words) <= right_margin + 1
 
 
-def test_rejects_pdf_without_text(fake_translator):
+def test_rejects_pdf_without_text():
     with pymupdf.open() as doc:
         doc.new_page()
         blank = doc.tobytes()
 
     with pytest.raises(NoTranslatableTextError):
-        translate_pdf(blank, "fr", "en")
+        translate_pdf(blank, FakeEngine())
 
 
 def test_link_extent_matches_the_column_containing_the_link():
