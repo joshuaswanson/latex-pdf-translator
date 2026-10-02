@@ -2,6 +2,7 @@ import hashlib
 import json
 import re
 import time
+from collections import Counter
 from pathlib import Path
 
 from deep_translator import GoogleTranslator
@@ -13,6 +14,9 @@ from translator.extract import TranslatableLine, Span
 # Google Translate rejects requests of 5000 characters or more
 MAX_GROUP_CHARS = 4500
 MAX_ATTEMPTS = 3
+
+# Lines this much larger than the body text are treated as headings
+HEADING_SIZE_RATIO = 1.1
 
 # Math placeholder format: XXXM0XXX, XXXM1XXX, etc.
 # Google Translate preserves these as opaque tokens
@@ -73,6 +77,7 @@ def _group_paragraphs(lines: list[TranslatableLine]) -> list[list[int]]:
     groups = []
     current_group = []
     current_len = 0
+    heading_size = _body_font_size(lines) * HEADING_SIZE_RATIO
 
     def _is_mergeable(line):
         """A line can be merged into a paragraph only if it has no math."""
@@ -80,7 +85,7 @@ def _group_paragraphs(lines: list[TranslatableLine]) -> list[list[int]]:
             return False
         if line.font_style == "bold":
             return False
-        if line.spans and line.spans[0].size > 11:
+        if line.spans and line.spans[0].size > heading_size:
             return False
         if line.math_spans:
             return False
@@ -118,6 +123,15 @@ def _group_paragraphs(lines: list[TranslatableLine]) -> list[list[int]]:
         groups.append(current_group)
 
     return groups
+
+
+def _body_font_size(lines: list[TranslatableLine]) -> float:
+    """Most common line font size, weighted by text length."""
+    sizes = Counter()
+    for line in lines:
+        if line.spans:
+            sizes[round(line.spans[0].size, 1)] += len(line.template)
+    return sizes.most_common(1)[0][0] if sizes else 10.0
 
 
 def _merge_paragraph_templates(lines: list[TranslatableLine],

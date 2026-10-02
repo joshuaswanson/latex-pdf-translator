@@ -82,3 +82,11 @@ def test_failed_translations_are_not_cached(monkeypatch, tmp_path):
 
     assert result == ["Soit une fonction continue"]
     assert cache_path.read_text() == "{}"
+
+
+def test_body_text_in_12pt_documents_merges_into_paragraphs():
+    lines = [make_line("mot " * 20, y=100 + 13 * i) for i in range(3)]
+    for line in lines:
+        line.spans[0].size = 12
+
+    assert _group_paragraphs(lines) == [[0, 1, 2]]
