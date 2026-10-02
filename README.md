@@ -4,7 +4,7 @@ Translates LaTeX-typeset PDFs to English while preserving mathematical notation.
 
 ## How it works
 
-1. **Extract** - Parse PDF text spans, classify as translatable text (SFRM, SFBX, SFTI fonts) or math notation (CMMI, CMSY, CMEX, etc.)
+1. **Extract** - Parse PDF text spans, classify as translatable text or math notation (CMMI, CMSY, CMEX, etc.) by font. Text fonts are cm-super (SFRM, SFBX, SFTI), Latin Modern (LMRoman), or Computer Modern (CMR, CMBX, CMTI); in the last two, spans that contain only digits, operators, or operator names like `sin` count as math
 2. **Translate** - Send text to Google Translate (free) with `XXXM0XXX` placeholders for math spans, which Google preserves as opaque tokens
 3. **Render** - Remove original text via PDF redaction, re-render translated text using CMU Serif fonts and math symbols using Latin Modern Math with proper Unicode math italic/bold code points
 
@@ -33,9 +33,14 @@ uv run main.py path/to/math.pdf --source fr             # French to English
 uv run main.py path/to/math.pdf --source de --target es  # German to Spanish
 ```
 
-Output is saved as `<input>-<target>.pdf`. A `.cache.json` file is created alongside for fast re-runs.
+Output is saved next to the input as `<input>-<target>.pdf`. A `.cache.json` file is created alongside for fast re-runs.
+
+Run the tests with `uv run pytest`. They use small LaTeX fixtures in `tests/fixtures` and a fake translator, so they need no network access.
 
 ## Limitations
 
 - Line-level translation for math-containing lines (Google Translate can't reorder words around opaque markers perfectly)
-- Some CMEX extensible delimiter fragments use image fallback when Unicode mapping unavailable
+- Glyphs without a Unicode mapping (some CMEX delimiter fragments, script and Fraktur letters, small caps, unknown fonts) are copied from the original page
+- Translated lines wider than their text column are condensed horizontally to at most 70% of their natural width; beyond that they overflow
+- Terminology fixes for common Google Translate mistakes in math prose apply only to English output
+- Text before and after an inline fraction can land in separate PDF blocks; the two halves are then rendered independently and can overlap
