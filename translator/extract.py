@@ -1,27 +1,123 @@
 import re
+import unicodedata
 from dataclasses import dataclass
 
 
 # -- Configuration ----------------------------------------------------------
 
-TEXT_FONT_PREFIXES = ("SFRM", "SFBX", "SFBI", "SFTI")
+# cm-super fonts (T1 encoding) only ever hold text.
+CM_SUPER_TEXT_FONT_RE = re.compile(r"SF(?:RM|BX|BI|TI|SL)\d")
 
-# Font prefix -> style mapping
-BOLD_FONT_PREFIXES = ("SFBX", "SFBI")
-ITALIC_FONT_PREFIXES = ("SFTI", "SFBI")
+# Computer Modern and Latin Modern roman fonts typeset body text in documents
+# without cm-super, but they also typeset digits, operators and operator names
+# inside math.
+SHARED_ROMAN_FONT_RE = re.compile(
+    r"CM(?:R|BX|TI|BXTI|SL)\d|LMRoman(?:Slant)?\d+-(?:Regular|Bold|Italic|BoldItalic)\b"
+)
+
+# Whitespace and punctuation in a shared roman font belong to whichever of
+# text or math follows them.
+SEPARATOR_RE = re.compile(r"[\s,.;:!?]*")
+
+# OT1 fonts have no accented letters, so TeX stacks a spacing accent glyph on
+# the base letter and text extraction yields e.g. "d´eriv´ee".
+SPACING_TO_COMBINING_ACCENT = {
+    "\u00b4": "\u0301",  # acute
+    "`": "\u0300",       # grave
+    "\u02c6": "\u0302",  # circumflex
+    "\u00a8": "\u0308",  # diaeresis
+    "\u02dc": "\u0303",  # tilde
+    "\u02c7": "\u030c",  # caron
+    "\u02d8": "\u0306",  # breve
+    "\u02da": "\u030a",  # ring
+    "\u00af": "\u0304",  # macron
+    "\u02d9": "\u0307",  # dot above
+}
+SPACING_ACCENT_RE = re.compile(
+    "([" + "".join(SPACING_TO_COMBINING_ACCENT) + "])([A-Za-z\u0131\u0237])"
+)
+CEDILLA_RE = re.compile("\u00b8([cCsStT])|([cCsStT])\u00b8")
+DOTLESS_TO_DOTTED = {"\u0131": "i", "\u0237": "j"}
+
+EXTENSION_FONT_RE = re.compile(r"CMEX|LMMathExtension")
+
+BOLD_FONT_RE = re.compile(r"SFB[XI]|CMBX|-Bold")
+ITALIC_FONT_RE = re.compile(r"SF(?:BI|TI|SL)|CM(?:BX)?TI|CMSL|Italic|Slant")
+
+MATH_OPERATOR_NAMES = {
+    "sin", "cos", "tan", "cot", "sec", "csc", "arcsin", "arccos", "arctan",
+    "sinh", "cosh", "tanh", "coth", "log", "ln", "lg", "exp", "lim", "liminf",
+    "limsup", "sup", "inf", "max", "min", "det", "dim", "ker", "Ker", "deg",
+    "arg", "gcd", "lcm", "hom", "Hom", "End", "Aut", "Gal", "Im", "Re", "Id",
+    "id", "mod", "Pr", "tr", "Tr", "rank", "rk", "card", "Card", "Spec", "Res",
+    "Ind", "supp", "Supp", "Frac", "GL", "SL", "diag", "sgn", "vol", "grad",
+    "div", "rot", "curl", "dist", "diam", "ord",
+}
+
+ENGLISH_FUNCTION_WORDS = {
+    "the", "and", "of", "is", "are", "that", "this", "these", "with", "for",
+    "we", "which", "by", "from", "have", "has", "its", "where", "then", "such",
+    "there", "be", "not", "can", "our", "their", "into", "it", "to",
+}
 
 
 # -- Font classification ----------------------------------------------------
 
-def is_text_font(fontname: str) -> bool:
-    """True if font contains translatable text (vs math notation)."""
-    return any(prefix in fontname for prefix in TEXT_FONT_PREFIXES)
+def is_text_span(font: str, text: str, roman_is_text: bool) -> bool:
+    """True if a span holds translatable text (vs math notation)."""
+    if CM_SUPER_TEXT_FONT_RE.search(font):
+        return True
+    return roman_is_text and bool(SHARED_ROMAN_FONT_RE.search(font)) and _has_words(text)
+
+
+def _has_words(text: str) -> bool:
+    words = re.findall(r"[^\W\d_]{2,}", text)
+    return any(word not in MATH_OPERATOR_NAMES for word in words)
+
+
+def _is_separator(span: "Span") -> bool:
+    return bool(SHARED_ROMAN_FONT_RE.search(span.font)) and bool(SEPARATOR_RE.fullmatch(span.text))
+
+
+def _assign_separators(spans: list["Span"]):
+    """Mark separator spans as text when the next non-separator span is text."""
+    decided = [s for s in spans if not _is_separator(s)]
+    for i, span in enumerate(spans):
+        if not _is_separator(span):
+            continue
+        following = [s for s in spans[i + 1:] if not _is_separator(s)]
+        neighbor = following[0] if following else (decided[-1] if decided else None)
+        span.is_text = neighbor is not None and neighbor.is_text
+
+
+def _compose_accents(text: str) -> str:
+    def acute_etc(m):
+        base = DOTLESS_TO_DOTTED.get(m.group(2), m.group(2))
+        return unicodedata.normalize("NFC", base + SPACING_TO_COMBINING_ACCENT[m.group(1)])
+
+    def cedilla(m):
+        return unicodedata.normalize("NFC", (m.group(1) or m.group(2)) + "\u0327")
+
+    return CEDILLA_RE.sub(cedilla, SPACING_ACCENT_RE.sub(acute_etc, text))
+
+
+def _uses_cm_super(doc) -> bool:
+    return any(
+        CM_SUPER_TEXT_FONT_RE.search(font[3])
+        for page in doc
+        for font in page.get_fonts()
+    )
+
+
+def is_extension_font(font: str) -> bool:
+    """True for fonts with tall extensible delimiters and big operators."""
+    return bool(EXTENSION_FONT_RE.search(font))
 
 
 def _get_font_style(fontname: str) -> str:
     """Determine font style from the original font name."""
-    is_bold = any(prefix in fontname for prefix in BOLD_FONT_PREFIXES)
-    is_italic = any(prefix in fontname for prefix in ITALIC_FONT_PREFIXES)
+    is_bold = bool(BOLD_FONT_RE.search(fontname))
+    is_italic = bool(ITALIC_FONT_RE.search(fontname))
     if is_bold and is_italic:
         return "bolditalic"
     if is_bold:
@@ -39,6 +135,7 @@ class Span:
     font: str
     size: float
     bbox: tuple  # (x0, y0, x1, y1)
+    ink_bbox: tuple  # bbox of the non-whitespace characters
     origin: tuple  # (x, y) baseline point
     is_text: bool
 
@@ -48,6 +145,7 @@ class TranslatableLine:
     page_idx: int
     spans: list[Span]
     bbox: tuple
+    max_x1: float  # right edge of the text column containing the line
     template: str  # text with {M0} placeholders for math
     math_spans: list[list[Span]]  # groups of consecutive math spans per placeholder
     is_toc: bool  # has dot leaders
@@ -59,13 +157,27 @@ class TranslatableLine:
 
 # -- Extraction -------------------------------------------------------------
 
+def _add_span_text(raw: dict):
+    """Add "text" and "ink_bbox" to every span of a rawdict page."""
+    for block in raw["blocks"]:
+        for line in block.get("lines", []):
+            for span in line["spans"]:
+                span["text"] = "".join(c["c"] for c in span["chars"])
+                ink = [c["bbox"] for c in span["chars"] if c["c"].strip()]
+                span["ink_bbox"] = (
+                    (min(b[0] for b in ink), min(b[1] for b in ink),
+                     max(b[2] for b in ink), max(b[3] for b in ink))
+                    if ink else span["bbox"]
+                )
+
+
 def _line_core_y(line):
     """Get the core y-range of a line, excluding tall math symbols (CMEX).
 
     Uses non-CMEX span bboxes to avoid tall summation/integral signs from
     inflating the y-range. For CMEX-only lines, uses origin y with tight range.
     """
-    core_spans = [s for s in line["spans"] if "CMEX" not in s["font"]]
+    core_spans = [s for s in line["spans"] if not is_extension_font(s["font"])]
     if not core_spans:
         # All CMEX: use origin y with tight range to prevent false merges
         origins = [s["origin"][1] for s in line["spans"]]
@@ -78,10 +190,10 @@ def _line_core_y(line):
 
 def _is_cmex_only(line):
     """Check if a line contains only CMEX (tall delimiter/operator) spans."""
-    return all("CMEX" in s["font"] for s in line["spans"])
+    return all(is_extension_font(s["font"]) for s in line["spans"])
 
 
-def _merge_same_y_lines(lines, max_x_gap=8):
+def _merge_same_y_lines(lines, roman_is_text: bool, max_x_gap=8):
     """Merge raw PDF lines that are on the same visual line (y-ranges overlap).
 
     This handles cases like d/dx fractions where the numerator, denominator,
@@ -164,21 +276,18 @@ def _merge_same_y_lines(lines, max_x_gap=8):
                 result.append(cluster[0])
                 continue
 
-            # Only merge if cluster is small and has translatable text
-            has_text = any(
-                any(p in s["font"] for p in ("SFRM", "SFBX", "SFBI", "SFTI"))
-                for line in cluster for s in line["spans"]
-            )
+            def has_text(line):
+                return any(is_text_span(s["font"], s["text"], roman_is_text)
+                           for s in line["spans"])
+
             # Don't merge if multiple text lines start at left margin
             # (these are consecutive visual lines, not fragments)
             left_margin = min(l["bbox"][0] for l in cluster)
             margin_text_lines = sum(
                 1 for line in cluster
-                if line["bbox"][0] < left_margin + 15
-                and any(p in s["font"] for p in ("SFRM", "SFBX", "SFBI", "SFTI")
-                        for s in line["spans"])
+                if line["bbox"][0] < left_margin + 15 and has_text(line)
             )
-            if len(cluster) > 8 or not has_text or margin_text_lines > 1:
+            if len(cluster) > 8 or not any(map(has_text, cluster)) or margin_text_lines > 1:
                 result.extend(cluster)
             else:
                 # Merge: combine spans sorted by x, union bboxes
@@ -199,12 +308,18 @@ def _merge_same_y_lines(lines, max_x_gap=8):
 
 
 def extract_lines(doc) -> list[TranslatableLine]:
-    """Extract all lines containing translatable French text."""
+    """Extract all lines containing translatable text."""
     result = []
+    roman_is_text = not _uses_cm_super(doc)
 
     for page_idx in range(len(doc)):
         page = doc[page_idx]
-        raw = page.get_text("dict")
+        raw = page.get_text("rawdict")
+        _add_span_text(raw)
+        paragraph_bboxes = [
+            b["bbox"] for b in raw["blocks"]
+            if b["type"] == 0 and len(b["lines"]) >= 2
+        ]
 
         for block in raw["blocks"]:
             if block["type"] != 0:
@@ -214,7 +329,7 @@ def extract_lines(doc) -> list[TranslatableLine]:
             block_text = ""
             for line in block["lines"]:
                 for s in line["spans"]:
-                    if is_text_font(s["font"]):
+                    if is_text_span(s["font"], s["text"], roman_is_text):
                         block_text += s["text"]
             if _is_english_block(block_text):
                 continue
@@ -234,21 +349,28 @@ def extract_lines(doc) -> list[TranslatableLine]:
             block_lines_start = len(result)  # track where this block's lines start
 
             # Merge lines at the same y-level (e.g. fraction parts + surrounding text)
-            merged_block_lines = _merge_same_y_lines(block["lines"])
+            merged_block_lines = _merge_same_y_lines(block["lines"], roman_is_text)
 
             for line_data in merged_block_lines:
                 spans = []
                 for s in line_data["spans"]:
+                    is_text = is_text_span(s["font"], s["text"], roman_is_text)
+                    text = s["text"]
+                    if is_text and roman_is_text:
+                        text = _compose_accents(text)
                     spans.append(Span(
-                        text=s["text"],
+                        text=text,
                         font=s["font"],
                         size=s["size"],
                         bbox=tuple(s["bbox"]),
+                        ink_bbox=tuple(s["ink_bbox"]),
                         origin=tuple(s["origin"]),
-                        is_text=is_text_font(s["font"]),
+                        is_text=is_text,
                     ))
                 if not spans:
                     continue
+                if roman_is_text:
+                    _assign_separators(spans)
 
                 # Build template with math placeholders.
                 # Merge consecutive math spans into single placeholders so
@@ -317,6 +439,8 @@ def extract_lines(doc) -> list[TranslatableLine]:
                     page_idx=page_idx,
                     spans=spans,
                     bbox=tuple(line_data["bbox"]),
+                    max_x1=_column_right_edge(line_data["bbox"], block["bbox"],
+                                              paragraph_bboxes),
                     template=template,
                     math_spans=math_spans,
                     is_toc=is_toc,
@@ -348,6 +472,24 @@ def extract_lines(doc) -> list[TranslatableLine]:
     return result
 
 
+def _column_right_edge(line_bbox, block_bbox, paragraph_bboxes) -> float:
+    """Right edge of the text column a line sits in.
+
+    Uses the vertically nearest multi-line paragraph that spans the line's
+    left edge, so one-line blocks such as headings get the full column width.
+    """
+    x0, y0, x1, y1 = line_bbox
+    own_edge = max(block_bbox[2], x1)
+    candidates = [b for b in paragraph_bboxes if b[0] - 2 <= x0 <= b[2]]
+    if not candidates:
+        return own_edge
+
+    def vertical_gap(b):
+        return max(b[1] - y1, y0 - b[3], 0)
+
+    return max(own_edge, min(candidates, key=vertical_gap)[2])
+
+
 def _dominant_font_style(spans: list[Span]) -> str:
     """Find the most common font style among text spans by character count."""
     style_counts = {}
@@ -362,18 +504,11 @@ def _dominant_font_style(spans: list[Span]) -> str:
 
 def _is_english_block(text: str) -> bool:
     """Check if a block of text is already in English."""
-    words = re.findall(r'[a-zA-Z]{3,}', text.lower())
-    if len(words) < 5:
+    words = re.findall(r'[^\W\d_]{2,}', text.lower())
+    if len(words) < 8:
         return False
-    english_markers = {
-        'the', 'this', 'text', 'compilation', 'basic', 'results',
-        'functional', 'analysis', 'over', 'stress', 'mainly', 'put',
-        'space', 'functions', 'its', 'dual', 'distributions', 'order',
-        'point', 'being', 'that', 'these', 'spaces', 'have', 'come',
-        'play', 'important', 'role', 'theory', 'abstract',
-    }
-    count = sum(1 for w in words if w in english_markers)
-    return count / len(words) > 0.3
+    count = sum(1 for w in words if w in ENGLISH_FUNCTION_WORDS)
+    return count / len(words) > 0.15
 
 
 def _parse_toc_line(template: str) -> tuple[str, str]:

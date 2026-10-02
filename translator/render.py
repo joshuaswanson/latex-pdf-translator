@@ -37,22 +37,47 @@ MATH_FONT_FILE = FONT_DIR / "latinmodern-math.otf"
 MATH_FONT_NAME = "LMMath"
 MATH_FONT = pymupdf.Font(fontfile=str(MATH_FONT_FILE))
 
-# Map LaTeX math font prefixes to rendering style.
+# Map LaTeX math fonts (Computer Modern and their Latin Modern equivalents)
+# to a canonical kind. Order matters: earlier patterns win.
+MATH_FONT_KINDS = [
+    (re.compile(r"CMMI|LMMathItalic"), "CMMI"),
+    (re.compile(r"CMBSY|LMMathSymbols\d+-Bold"), "CMBS"),
+    (re.compile(r"CMSY|LMMathSymbols"), "CMSY"),
+    (re.compile(r"CMEX|LMMathExtension"), "CMEX"),
+    (re.compile(r"CMBXTI|LMRoman\d+-BoldItalic"), "CMBXTI"),
+    (re.compile(r"CMBX|LMRoman\d+-Bold"), "CMBX"),
+    (re.compile(r"CMTI|LMRoman\d+-Italic"), "CMTI"),
+    (re.compile(r"CMR\d|LMRoman\d+-Regular"), "CMR"),
+    (re.compile(r"rsfs"), "rsfs"),
+    (re.compile(r"EUFM"), "EUFM"),
+]
+
+# Map math font kinds to rendering style.
 # "math" = use Latin Modern Math (covers symbols, Greek, operators)
 # "italic"/"bold"/"regular" = use CMU text font (for plain letters/numbers)
+# Spans in any other font are copied from the original page.
 MATH_FONT_STYLE = {
-    "CMMI": "math",      # Computer Modern Math Italic (italic letters + Greek)
-    "CMBX": "bold",      # Computer Modern Bold Extended
-    "CMR1": "regular",   # Computer Modern Roman 10pt
-    "CMR5": "regular",   # Computer Modern Roman 5pt
-    "CMR7": "regular",   # Computer Modern Roman 7pt
-    "CMR8": "regular",   # Computer Modern Roman 8pt
-    "CMBS": "math",      # Computer Modern Bold Symbols
-    "CMSY": "math",      # Computer Modern Symbols
-    "CMEX": "math",      # Computer Modern Extensions (big delimiters)
-    "rsfs": "math",      # Ralph Smith Formal Script
-    "EUFM": "math",      # Euler Fraktur
+    "CMMI": "math",          # Math Italic (italic letters + Greek)
+    "CMBS": "math",          # Bold Symbols
+    "CMSY": "math",          # Symbols
+    "CMEX": "math",          # Extensions (big delimiters)
+    "CMBXTI": "bolditalic",  # Bold Extended Text Italic
+    "CMBX": "bold",          # Bold Extended
+    "CMTI": "italic",        # Text Italic
+    "CMR": "regular",        # Roman
+    "rsfs": "math",          # Ralph Smith Formal Script
+    "EUFM": "math",          # Euler Fraktur
 }
+
+# Padding (x, top, bottom) around copied glyphs. Script fonts have flourishes
+# outside their character boxes; other fonts' character boxes already span the
+# full ascender-to-descender height.
+SCRIPT_GLYPH_PADDING = (1.5, 2.5, 1.5)
+TIGHT_GLYPH_PADDING = (0.3, 0.3, 0.3)
+
+# Translated text that would overflow its block is condensed horizontally,
+# down to this fraction of its natural width.
+MIN_TEXT_SCALE = 0.7
 
 
 def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
@@ -67,7 +92,8 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
         page_lines.setdefault(line.page_idx, []).append((line, translated))
 
     # Track rendered text extents for link rectangle adjustment
-    rendered_extents = {}  # (page_idx, round(y_mid)) -> (x0, text_end_x)
+    # (page_idx, round(y_mid)) -> [(orig_x0, orig_x1, new_x0, text_end_x), ...]
+    rendered_extents = {}
 
     # Collect link annotation colors and text from ALL pages before any redaction
     all_annot_colors = {}  # (page_idx, round_x0, round_y0) -> (r, g, b)
@@ -140,7 +166,8 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
             # Record rendered text extent for link rectangle adjustment
             y_mid = (line.bbox[1] + line.bbox[3]) / 2
             orig_x0, orig_x1 = line.bbox[0], line.bbox[2]
-            rendered_extents[(page_idx, round(y_mid))] = (orig_x0, orig_x1, line.bbox[0], text_end_x)
+            rendered_extents.setdefault((page_idx, round(y_mid)), []).append(
+                (orig_x0, orig_x1, orig_x0, text_end_x))
             changed += 1
 
         if progress_callback:
@@ -168,64 +195,36 @@ def _build_style_map(line: TranslatableLine, translated: str) -> list:
     """
     # Total original text length (excluding math markers)
     orig_text_len = sum(count for count, _ in line.text_styles)
-    if not orig_text_len or not line.text_styles:
+    if not orig_text_len:
         return [(translated, line.font_style)]
 
     # Extract just the text portions from translated (skip math markers)
-    text_only = re.sub(r'\{M\d+\}', '', translated)
-    trans_text_len = len(text_only)
+    trans_text_len = len(re.sub(r'\{M\d+\}', '', translated))
     if not trans_text_len:
         return [(translated, line.font_style)]
 
-    # Build character-level style array for translated text proportionally
-    style_breaks = []  # (fraction, style)
+    # Character offset in the translated text where each style run ends.
+    # The last run ends exactly at trans_text_len.
+    run_ends = []
     cumulative = 0
     for count, style in line.text_styles:
         cumulative += count
-        style_breaks.append((cumulative / orig_text_len, style))
+        run_ends.append((int(cumulative / orig_text_len * trans_text_len), style))
 
-    # Now split translated text into styled segments
-    # We work on the full translated text (with markers), tracking text position
     result = []
-    current_style_idx = 0
-    text_chars_seen = 0
-
-    # Parse into segments first, then assign styles
-    segments = _parse_segments(translated)
-    for seg in segments:
+    pos = 0
+    for seg in _parse_segments(translated):
         if seg["type"] == "math":
-            # Math markers pass through with current style
             result.append((f"{{M{seg['index']}}}", "math"))
-        else:
-            text = seg["text"]
-            # Split this text segment at style boundaries
-            remaining = text
-            while remaining:
-                if current_style_idx >= len(style_breaks):
-                    current_style = line.text_styles[-1][1]
-                else:
-                    current_style = style_breaks[current_style_idx][1] if current_style_idx < len(style_breaks) else line.font_style
-
-                # How many more text chars until next style break?
-                if current_style_idx < len(style_breaks):
-                    break_at_frac = style_breaks[current_style_idx][0]
-                    break_at_chars = int(break_at_frac * trans_text_len)
-                    chars_until_break = break_at_chars - text_chars_seen
-                else:
-                    chars_until_break = len(remaining)
-
-                if chars_until_break <= 0:
-                    current_style_idx += 1
-                    continue
-
-                take = min(len(remaining), chars_until_break)
-                chunk = remaining[:take]
-                remaining = remaining[take:]
-                text_chars_seen += take
-                result.append((chunk, current_style))
-
-                if text_chars_seen >= break_at_chars if current_style_idx < len(style_breaks) else False:
-                    current_style_idx += 1
+            continue
+        text = seg["text"]
+        seg_start = pos
+        seg_end = pos + len(text)
+        for run_end, style in run_ends:
+            chunk_end = min(run_end, seg_end)
+            if chunk_end > pos:
+                result.append((text[pos - seg_start:chunk_end - seg_start], style))
+                pos = chunk_end
 
     return result
 
@@ -331,174 +330,202 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
     styled_segments = _build_style_map(line, translated)
     styled_segments = _fix_style_boundaries(styled_segments)
 
+    toc_font_obj = FONT_OBJECTS[line.font_style]
+    right_limit = line.max_x1
+    if line.is_toc:
+        right_limit = _toc_text_limit(line, fontsize, toc_font_obj)
+    text_scale = _fit_text_scale(line, styled_segments, fontsize, right_limit - x0)
+
     # Render from left to right
     x = x0
     for text, style in styled_segments:
         if style == "math":
-            # Parse math marker
             m = re.match(r'\{M(\d+)\}', text)
             if not m:
                 continue
             idx = int(m.group(1))
             if idx >= len(line.math_spans):
                 continue
-            group = line.math_spans[idx]
-            # Pre-process: identify fraction components (stacked spans)
-            # by checking for spans that overlap in x but differ in y.
-            # Require x-centers to be close (fractions are centered) to avoid
-            # false positives on subscript/superscript pairs.
-            stacked = set()  # indices of spans that are fraction parts
-            for gi in range(len(group)):
-                for gj in range(gi + 1, len(group)):
-                    s1, s2 = group[gi], group[gj]
-                    x_overlap = min(s1.bbox[2], s2.bbox[2]) - max(s1.bbox[0], s2.bbox[0])
-                    if x_overlap > 0 and abs(s1.origin[1] - s2.origin[1]) > 3:
-                        # Check x-centers are aligned (fraction, not sub/superscript)
-                        c1 = (s1.bbox[0] + s1.bbox[2]) / 2
-                        c2 = (s2.bbox[0] + s2.bbox[2]) / 2
-                        min_w = min(s1.bbox[2] - s1.bbox[0], s2.bbox[2] - s2.bbox[0])
-                        if abs(c1 - c2) < max(min_w * 0.7, 2.0):
-                            # Reject if these are sub/superscripts of a base character:
-                            # both start right at the right edge of a preceding span
-                            left_edge = min(s1.bbox[0], s2.bbox[0])
-                            is_sub_super = False
-                            for gk in range(len(group)):
-                                if gk == gi or gk == gj:
-                                    continue
-                                base = group[gk]
-                                if abs(base.bbox[2] - left_edge) < 1.5:
-                                    is_sub_super = True
-                                    break
-                            if not is_sub_super:
-                                stacked.add(gi)
-                                stacked.add(gj)
-
-            # Pre-process: attach superscript/subscript spans to preceding
-            # rsfs/EUFM spans so they get copied as one compound glyph.
-            # This preserves e.g. C^r where the script C and superscript r
-            # must be rendered together from the original.
-            attached = set()  # indices of spans absorbed into a preceding span
-            for gi in range(len(group) - 1):
-                ms_cur = group[gi]
-                prefix_cur = _math_font_prefix(ms_cur.font)
-                if prefix_cur not in ("rsfs", "EUFM"):
-                    continue
-                if not ms_cur.text.strip():
-                    continue
-                # Collect following spans that are superscripts/subscripts
-                extras = []
-                for gj in range(gi + 1, len(group)):
-                    ms_next = group[gj]
-                    if not ms_next.text.strip():
-                        extras.append(ms_next)
-                        attached.add(gj)
-                        continue
-                    # Check if it's a super/subscript: smaller size, x starts
-                    # near the right edge of the current span.
-                    # Note: origin[1] can be identical for superscripts in some
-                    # PDFs (e.g. rsfs C^r both report same baseline), so we
-                    # rely on size difference alone.
-                    if (ms_next.size < ms_cur.size
-                            and abs(ms_next.bbox[0] - ms_cur.bbox[2]) < 3):
-                        extras.append(ms_next)
-                        attached.add(gj)
-                    else:
-                        break
-                if extras:
-                    ms_cur._attached_spans = [e for e in extras if e.text.strip()]
-
-            # Render: stacked spans at same x, sequential spans advance x
-            frac_x_start = None
-            frac_max_width = 0
-            for gi, ms in enumerate(group):
-                if gi in attached:
-                    continue
-                math_rect = pymupdf.Rect(ms.bbox)
-                if math_rect.is_empty or math_rect.width < 0.5:
-                    continue
-                if gi in stacked:
-                    if frac_x_start is None:
-                        frac_x_start = x
-                    rendered = _render_math_span(page, orig_page, ms, frac_x_start, baseline_y)
-                    frac_max_width = max(frac_max_width, rendered)
-                else:
-                    # Flush any pending fraction width
-                    if frac_x_start is not None:
-                        _draw_fraction_bars(page, group, stacked,
-                                            frac_x_start,
-                                            frac_x_start + frac_max_width,
-                                            baseline_y)
-                        x = frac_x_start + frac_max_width + 1.5
-                        frac_x_start = None
-                        frac_max_width = 0
-                    rendered = _render_math_span(page, orig_page, ms, x, baseline_y)
-                    x += rendered
-            # Flush final fraction (if stacked spans are at end of group)
-            if frac_x_start is not None:
-                _draw_fraction_bars(page, group, stacked,
-                                    frac_x_start,
-                                    frac_x_start + frac_max_width,
-                                    baseline_y)
-                x = frac_x_start + frac_max_width + 1.5
+            x += _render_math_group(page, orig_page, line.math_spans[idx], x)
         else:
             if not text:
                 continue
-            font_name = FONT_NAMES[style]
             font_obj = FONT_OBJECTS[style]
+            origin = pymupdf.Point(x, baseline_y)
             page.insert_text(
-                pymupdf.Point(x, baseline_y),
+                origin,
                 text,
-                fontname=font_name,
+                fontname=FONT_NAMES[style],
                 fontsize=fontsize,
                 color=(0, 0, 0),
+                morph=(origin, pymupdf.Matrix(text_scale, 1)) if text_scale < 1 else None,
             )
-            x += font_obj.text_length(text, fontsize=fontsize)
+            x += font_obj.text_length(text, fontsize=fontsize) * text_scale
 
     text_end_x = x  # Position after title text, before dots
 
     # For TOC lines, add dot leaders and page number
     if line.is_toc:
-        toc_font_name = FONT_NAMES[line.font_style]
-        toc_font_obj = FONT_OBJECTS[line.font_style]
-        _render_toc_dots(page, x, baseline_y, fontsize, toc_font_name,
+        _render_toc_dots(page, x, baseline_y, fontsize, FONT_NAMES[line.font_style],
                          toc_font_obj, line)
 
     return text_end_x
 
 
-def _math_font_prefix(font: str) -> str:
-    """Extract the base font prefix (e.g., 'CMMI' from 'FITVLG+CMMI10')."""
-    name = font.split("+")[-1] if "+" in font else font
-    # Match known prefixes
-    for prefix in ("CMMI", "CMBX", "CMEX", "CMSY", "CMBS", "rsfs", "EUFM"):
-        if name.startswith(prefix):
-            return prefix
-    # CMR with size suffix (CMR10, CMR7, CMR5, CMR8)
-    if name.startswith("CMR"):
-        return name[:4]  # CMR1, CMR5, CMR7, CMR8
-    return name[:4]
+def _fit_text_scale(line: TranslatableLine, styled_segments: list,
+                    fontsize: float, available: float) -> float:
+    """Horizontal scale for text segments so the line fits in `available`."""
+    text_width = 0
+    math_width = 0
+    for text, style in styled_segments:
+        if style == "math":
+            m = re.match(r'\{M(\d+)\}', text)
+            if m and int(m.group(1)) < len(line.math_spans):
+                math_width += _render_math_group(None, None, line.math_spans[int(m.group(1))], 0)
+        else:
+            text_width += FONT_OBJECTS[style].text_length(text, fontsize=fontsize)
+    if text_width == 0 or text_width + math_width <= available + 1:
+        return 1.0
+    return max(MIN_TEXT_SCALE, (available - math_width) / text_width)
 
 
-def _map_math_text(text: str, font_prefix: str) -> str:
+def _toc_text_limit(line: TranslatableLine, fontsize: float, font_obj) -> float:
+    """Rightmost x for TOC entry text, leaving room for dots and page number."""
+    right_edge = line.bbox[2]
+    if line.toc_page_num:
+        right_edge -= font_obj.text_length(line.toc_page_num, fontsize=fontsize) + 4
+    return right_edge - 4 - 3 * font_obj.text_length(". ", fontsize=fontsize)
+
+
+def _render_math_group(page, orig_page, group: list[Span], x: float) -> float:
+    """Render one math placeholder's spans starting at x, returning width consumed.
+
+    With page=None nothing is drawn and only the width is computed.
+    """
+    stacked = _find_stacked_spans(group)
+    attached = _find_attached_spans(group)
+    absorbed = {j for extras in attached.values() for j in extras}
+
+    # Render: stacked spans at same x, sequential spans advance x
+    start_x = x
+    frac_x_start = None
+    frac_max_width = 0
+    for gi, ms in enumerate(group):
+        if gi in absorbed:
+            continue
+        math_rect = pymupdf.Rect(ms.bbox)
+        if math_rect.is_empty or math_rect.width < 0.5:
+            continue
+        extra_spans = [group[j] for j in attached.get(gi, []) if group[j].text.strip()]
+        if gi in stacked:
+            if frac_x_start is None:
+                frac_x_start = x
+            rendered = _render_math_span(page, orig_page, ms, frac_x_start, extra_spans)
+            frac_max_width = max(frac_max_width, rendered)
+        else:
+            # Flush any pending fraction width
+            if frac_x_start is not None:
+                _draw_fraction_bars(page, group, stacked, frac_x_start,
+                                    frac_x_start + frac_max_width)
+                x = frac_x_start + frac_max_width + 1.5
+                frac_x_start = None
+                frac_max_width = 0
+            x += _render_math_span(page, orig_page, ms, x, extra_spans)
+    # Flush final fraction (if stacked spans are at end of group)
+    if frac_x_start is not None:
+        _draw_fraction_bars(page, group, stacked, frac_x_start,
+                            frac_x_start + frac_max_width)
+        x = frac_x_start + frac_max_width + 1.5
+    return x - start_x
+
+
+def _find_stacked_spans(group: list[Span]) -> set[int]:
+    """Indices of spans that are fraction parts.
+
+    Fraction parts overlap in x but differ in y. Their x-centers must be close
+    (fractions are centered), which rules out most subscript/superscript pairs.
+    """
+    stacked = set()
+    for gi in range(len(group)):
+        for gj in range(gi + 1, len(group)):
+            s1, s2 = group[gi], group[gj]
+            x_overlap = min(s1.bbox[2], s2.bbox[2]) - max(s1.bbox[0], s2.bbox[0])
+            if x_overlap <= 0 or abs(s1.origin[1] - s2.origin[1]) <= 3:
+                continue
+            c1 = (s1.bbox[0] + s1.bbox[2]) / 2
+            c2 = (s2.bbox[0] + s2.bbox[2]) / 2
+            min_w = min(s1.bbox[2] - s1.bbox[0], s2.bbox[2] - s2.bbox[0])
+            if abs(c1 - c2) >= max(min_w * 0.7, 2.0):
+                continue
+            # Reject sub/superscripts of a base character: both start right
+            # at the right edge of another span
+            left_edge = min(s1.bbox[0], s2.bbox[0])
+            is_sub_super = any(
+                abs(group[gk].bbox[2] - left_edge) < 1.5
+                for gk in range(len(group)) if gk not in (gi, gj)
+            )
+            if not is_sub_super:
+                stacked.add(gi)
+                stacked.add(gj)
+    return stacked
+
+
+def _find_attached_spans(group: list[Span]) -> dict[int, list[int]]:
+    """Map rsfs/EUFM span indices to the super/subscript spans that follow them.
+
+    These get copied together from the original as one compound glyph, which
+    preserves e.g. C^r where the script C and superscript r belong together.
+    """
+    attached = {}
+    for gi in range(len(group) - 1):
+        ms_cur = group[gi]
+        if _math_font_kind(ms_cur.font) not in ("rsfs", "EUFM"):
+            continue
+        if not ms_cur.text.strip():
+            continue
+        extras = []
+        for gj in range(gi + 1, len(group)):
+            ms_next = group[gj]
+            # origin[1] can be identical for superscripts in some PDFs (e.g.
+            # rsfs C^r both report the same baseline), so only size and
+            # x-adjacency identify a super/subscript.
+            if (not ms_next.text.strip()
+                    or (ms_next.size < ms_cur.size
+                        and abs(ms_next.bbox[0] - ms_cur.bbox[2]) < 3)):
+                extras.append(gj)
+            else:
+                break
+        if extras:
+            attached[gi] = extras
+    return attached
+
+
+def _math_font_kind(font: str) -> str | None:
+    """Canonical math font kind (e.g. 'CMMI' for 'FITVLG+CMMI10'), or None."""
+    name = font.split("+")[-1]
+    for pattern, kind in MATH_FONT_KINDS:
+        if pattern.search(name):
+            return kind
+    return None
+
+
+def _map_math_text(text: str, font_kind: str) -> str:
     """Map math span text to Unicode characters renderable by Latin Modern Math."""
-    if font_prefix == "CMEX":
-        return "".join(CMEX_CHAR_MAP.get(ch, ch) for ch in text)
-    if font_prefix == "rsfs":
-        return "".join(RSFS_CHAR_MAP.get(ch, ch) for ch in text)
-    if font_prefix == "CMMI":
-        # Math italic: map letters to Unicode math italic code points
-        return "".join(MATH_ITALIC_MAP.get(ch, ch) for ch in text)
-    if font_prefix == "CMBX":
-        # Math bold: map letters to Unicode math bold code points
-        return "".join(MATH_BOLD_MAP.get(ch, ch) for ch in text)
-    if font_prefix == "EUFM":
-        return "".join(EUFM_CHAR_MAP.get(ch, ch) for ch in text)
-    return text
+    char_map = {
+        "CMEX": CMEX_CHAR_MAP,
+        "rsfs": RSFS_CHAR_MAP,
+        "CMMI": MATH_ITALIC_MAP,
+        "CMBX": MATH_BOLD_MAP,
+        "EUFM": EUFM_CHAR_MAP,
+    }.get(font_kind)
+    if char_map is None:
+        return text
+    return "".join(char_map.get(ch, ch) for ch in text)
 
 
 def _copy_original_glyph(page, orig_page, ms: Span, x: float,
-                         baseline_y: float,
-                         extra_spans: list[Span] | None = None) -> float:
+                         extra_spans: list[Span] | None = None,
+                         padding: tuple = SCRIPT_GLYPH_PADDING) -> float:
     """Copy a glyph from the original page to preserve its exact appearance.
 
     Used for fonts like rsfs and EUFM where pymupdf can't render the Unicode
@@ -506,69 +533,66 @@ def _copy_original_glyph(page, orig_page, ms: Span, x: float,
 
     If extra_spans is provided, the source/dest rects are expanded to include
     those spans (e.g. superscripts attached to a script letter like C^r).
+    Only the inked area is copied, so neighboring glyphs inside a span's
+    leading or trailing whitespace stay behind.
     """
-    orig_rect = pymupdf.Rect(ms.bbox)
-    if orig_rect.is_empty or orig_rect.width < 0.5:
+    full_rect = pymupdf.Rect(ms.bbox)
+    if full_rect.is_empty or full_rect.width < 0.5:
         return 0
 
-    # Expand rect to include any attached spans (superscripts, subscripts)
-    combined_rect = pymupdf.Rect(orig_rect)
-    if extra_spans:
-        for es in extra_spans:
-            combined_rect |= pymupdf.Rect(es.bbox)
+    ink_rect = pymupdf.Rect(ms.ink_bbox)
+    for es in extra_spans or []:
+        full_rect |= pymupdf.Rect(es.bbox)
+        ink_rect |= pymupdf.Rect(es.ink_bbox)
 
-    # Add padding to avoid clipping glyph edges (especially cursive ascenders)
-    pad_x = 1.5
-    pad_top = 2.5  # extra for ascenders/flourishes
-    pad_bot = 1.5
+    pad_x, pad_top, pad_bot = padding
     src_rect = pymupdf.Rect(
-        combined_rect.x0 - pad_x, combined_rect.y0 - pad_top,
-        combined_rect.x1 + pad_x, combined_rect.y1 + pad_bot,
+        ink_rect.x0 - pad_x, ink_rect.y0 - pad_top,
+        ink_rect.x1 + pad_x, ink_rect.y1 + pad_bot,
     )
 
-    # Calculate destination rectangle preserving size (with matching padding)
-    y_offset = combined_rect.y0 - baseline_y
+    # Destination keeps the original size and vertical position
+    dst_x0 = x + (ink_rect.x0 - full_rect.x0)
     dst_rect = pymupdf.Rect(
-        x - pad_x, baseline_y + y_offset - pad_top,
-        x + combined_rect.width + pad_x,
-        baseline_y + y_offset + combined_rect.height + pad_bot,
+        dst_x0 - pad_x, ink_rect.y0 - pad_top,
+        dst_x0 + ink_rect.width + pad_x, ink_rect.y1 + pad_bot,
     )
 
-    # Copy from original page
-    page.show_pdf_page(dst_rect, orig_page.parent, orig_page.number, clip=src_rect)
-    return combined_rect.width
+    if page is not None:
+        page.show_pdf_page(dst_rect, orig_page.parent, orig_page.number, clip=src_rect)
+    return full_rect.width
 
 
 def _render_math_span(page, orig_page, ms: Span, x: float,
-                      baseline_y: float) -> float:
+                      extra_spans: list[Span]) -> float:
     """Render a single math span as vector text, returning width consumed."""
-    prefix = _math_font_prefix(ms.font)
-    style = MATH_FONT_STYLE.get(prefix)
+    kind = _math_font_kind(ms.font)
+    style = MATH_FONT_STYLE.get(kind)
 
     if style is None:
-        # Unknown font - use original bbox width as spacing
-        return pymupdf.Rect(ms.bbox).width
+        if not ms.text.strip():
+            return pymupdf.Rect(ms.bbox).width
+        return _copy_original_glyph(page, orig_page, ms, x, padding=TIGHT_GLYPH_PADDING)
 
     # For rsfs (script) and EUFM (fraktur) fonts, copy the original glyph
     # because pymupdf can't render supplementary plane Unicode via insert_text
-    if prefix in ("rsfs", "EUFM") and ms.text.strip():
-        return _copy_original_glyph(page, orig_page, ms, x, baseline_y,
-                                    extra_spans=getattr(ms, '_attached_spans', None))
+    if kind in ("rsfs", "EUFM") and ms.text.strip():
+        return _copy_original_glyph(page, orig_page, ms, x, extra_spans)
 
     # For CMEX characters not in the mapping, copy from original
-    if prefix == "CMEX" and any(ch not in CMEX_CHAR_MAP for ch in ms.text if ch.strip()):
-        return _copy_original_glyph(page, orig_page, ms, x, baseline_y)
+    if kind == "CMEX" and any(ch not in CMEX_CHAR_MAP for ch in ms.text if ch.strip()):
+        return _copy_original_glyph(page, orig_page, ms, x)
 
     # CMSY combining characters (e.g. U+0338 "not" slash) need original glyph
     # because they overlay the next character and can't render standalone
-    if prefix == "CMSY" and any(ord(ch) < 0x20 or ch == '\u0338' for ch in ms.text if ch.strip()):
-        return _copy_original_glyph(page, orig_page, ms, x, baseline_y)
+    if kind == "CMSY" and any(ord(ch) < 0x20 or ch == '\u0338' for ch in ms.text if ch.strip()):
+        return _copy_original_glyph(page, orig_page, ms, x)
 
     # Determine font to use
     if style == "math":
         m_font_name = MATH_FONT_NAME
         m_font_obj = MATH_FONT
-        text = _map_math_text(ms.text, prefix)
+        text = _map_math_text(ms.text, kind)
     else:
         m_font_name = FONT_NAMES[style]
         m_font_obj = FONT_OBJECTS[style]
@@ -577,25 +601,22 @@ def _render_math_span(page, orig_page, ms: Span, x: float,
     if not text or text.isspace():
         return m_font_obj.text_length(text, fontsize=ms.size) if text else 0
 
-    # Use the math span's original baseline for vertical positioning
-    math_baseline = ms.origin[1]
-    y_offset = math_baseline - baseline_y
-
-    page.insert_text(
-        pymupdf.Point(x, baseline_y + y_offset),
-        text,
-        fontname=m_font_name,
-        fontsize=ms.size,
-        color=(0, 0, 0),
-    )
+    # The math span keeps its original baseline (sub/superscripts sit off the line)
+    if page is not None:
+        page.insert_text(
+            pymupdf.Point(x, ms.origin[1]),
+            text,
+            fontname=m_font_name,
+            fontsize=ms.size,
+            color=(0, 0, 0),
+        )
     return m_font_obj.text_length(text, fontsize=ms.size)
 
 
 def _draw_fraction_bars(page, group: list, stacked: set,
-                        frac_x_start: float, frac_x_end: float,
-                        baseline_y: float):
+                        frac_x_start: float, frac_x_end: float):
     """Draw fraction bars for stacked spans within a math group."""
-    if not stacked:
+    if page is None or not stacked:
         return
     stacked_spans = [group[i] for i in sorted(stacked)]
     if len(stacked_spans) < 2:
@@ -603,9 +624,7 @@ def _draw_fraction_bars(page, group: list, stacked: set,
     stacked_spans.sort(key=lambda s: s.bbox[1])
     upper = stacked_spans[0]
     lower = stacked_spans[-1]
-    # Bar y: midpoint between bottom of upper and top of lower, offset from baseline
-    bar_y_orig = (upper.bbox[3] + lower.bbox[1]) / 2
-    bar_y = baseline_y + (bar_y_orig - baseline_y)
+    bar_y = (upper.bbox[3] + lower.bbox[1]) / 2
     shape = page.new_shape()
     shape.draw_line(
         pymupdf.Point(frac_x_start, bar_y),
@@ -676,8 +695,20 @@ def _search_link_text(page, text: str, orig_rect) -> pymupdf.Rect | None:
     return best
 
 
-def _fix_link_annotations(doc, annot_colors: dict, rendered_extents: dict,
-                          link_texts: dict):
+def _find_extent(rendered_extents: dict, page_idx: int, link_rect) -> tuple | None:
+    """Rendered line extent for the line a link sits on."""
+    mid_y = round((link_rect.y0 + link_rect.y1) / 2)
+    # Try exact y match, then +/- 1 for rounding tolerance
+    for y in (mid_y, mid_y + 1, mid_y - 1):
+        for extent in rendered_extents.get((page_idx, y), []):
+            orig_x0, orig_x1 = extent[0], extent[1]
+            if orig_x0 - 5 <= link_rect.x0 <= orig_x1:
+                return extent
+    return None
+
+
+def fix_link_annotations(doc, annot_colors: dict, rendered_extents: dict,
+                         link_texts: dict):
     """Fix link border colors and adjust rectangles to match rendered text."""
     for page_idx in range(len(doc)):
         page = doc[page_idx]
@@ -700,11 +731,7 @@ def _fix_link_annotations(doc, annot_colors: dict, rendered_extents: dict,
 
             # Adjust link rectangle to match rendered text extent
             lr = link["from"]
-            mid_y = (lr.y0 + lr.y1) / 2
-            # Try exact y match, then +/- 1 for rounding tolerance
-            extent = (rendered_extents.get((page_idx, round(mid_y)))
-                      or rendered_extents.get((page_idx, round(mid_y) + 1))
-                      or rendered_extents.get((page_idx, round(mid_y) - 1)))
+            extent = _find_extent(rendered_extents, page_idx, lr)
             if not extent:
                 continue
 
@@ -737,7 +764,7 @@ def _fix_link_annotations(doc, annot_colors: dict, rendered_extents: dict,
                 adj_x1 = new_text_end
             else:
                 # Inline link: proportionally scale position within the line
-                ratio = new_width / orig_width if orig_width > 0 else 1.0
+                ratio = new_width / orig_width
                 rel_x0 = lr.x0 - orig_x0
                 rel_x1 = lr.x1 - orig_x0
                 adj_x0 = new_x0 + rel_x0 * ratio
