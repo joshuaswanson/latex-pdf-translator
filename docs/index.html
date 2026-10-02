@@ -865,16 +865,11 @@
 
       const dropZone = document.getElementById("dropZone");
       const fileInput = document.getElementById("fileInput");
-      const browseBtn = document.getElementById("browseBtn");
       const sourceLang = document.getElementById("sourceLang");
 
       // Store original drop zone HTML for reset
       const originalDropHTML = dropZone.innerHTML;
 
-      browseBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        fileInput.click();
-      });
       dropZone.addEventListener("click", (e) => {
         if (e.target.closest("a, button")) return;
         if (
@@ -916,7 +911,7 @@
           '<div class="spinner"></div>' +
           "<h3>Uploading...</h3>" +
           '<p style="color: var(--ink-faint)">' +
-          file.name +
+          escapeHtml(file.name) +
           "</p>";
 
         // If upload takes >5s, server is probably waking up
@@ -967,6 +962,10 @@
           try {
             const res = await fetch(API_BASE + "/status/" + jobId);
             const data = await res.json();
+            if (!res.ok) {
+              showError(data.detail || "Translation failed");
+              return;
+            }
             const elapsed = Math.round((Date.now() - startTime) / 1000);
 
             if (data.status === "processing") {
@@ -981,7 +980,7 @@
               dropZone.innerHTML =
                 '<div class="spinner"></div>' +
                 "<h3>" +
-                data.stage +
+                escapeHtml(data.stage) +
                 "</h3>" +
                 progressHtml +
                 '<p style="color: var(--ink-faint)">' +
@@ -1007,14 +1006,14 @@
         dropZone.innerHTML =
           '<h3 style="color: var(--green)">Translation complete</h3>' +
           "<p>" +
-          outName +
+          escapeHtml(outName) +
           "</p>" +
           '<a class="download-btn" href="' +
           API_BASE +
           "/download/" +
           jobId +
           '" download="' +
-          outName +
+          escapeHtml(outName) +
           '">Download PDF</a>' +
           '<br><button class="reset-link" onclick="resetDropZone()">Translate another</button>';
       }
@@ -1033,16 +1032,18 @@
         dropZone.className = "drop-zone";
         dropZone.innerHTML = originalDropHTML;
         fileInput.value = "";
-        // Re-bind browse button
-        document
-          .getElementById("browseBtn")
-          .addEventListener("click", () => fileInput.click());
       }
 
+      const HTML_ESCAPES = {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      };
+
       function escapeHtml(str) {
-        const d = document.createElement("div");
-        d.textContent = str;
-        return d.innerHTML;
+        return String(str).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
       }
 
       // Render decorative math symbols with KaTeX
