@@ -240,6 +240,40 @@
         color: var(--ink-faint);
       }
 
+      /* --- Engine credentials --- */
+      .key-row {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.6rem;
+        margin-bottom: 1.25rem;
+      }
+
+      .key-row[hidden] {
+        display: none;
+      }
+
+      .key-row input {
+        font-family: var(--mono);
+        font-size: 0.9rem;
+        width: min(100%, 26rem);
+        padding: 0.45rem 0.75rem;
+        border: 1px solid var(--rule);
+        border-radius: 6px;
+        background: var(--warm-white);
+        color: var(--ink);
+      }
+
+      .key-note {
+        font-size: 0.85rem;
+        color: var(--ink-faint);
+        text-align: center;
+      }
+
+      .key-note a {
+        color: var(--accent);
+      }
+
       /* --- Upload zone --- */
       .upload-area {
         margin-top: 1.5rem;
@@ -737,6 +771,41 @@
           <span class="lang-arrow">&rarr; English</span>
         </div>
 
+        <div class="lang-row">
+          <label for="engine">Engine</label>
+          <select id="engine">
+            <option value="google" selected>Google Translate (free, no key)</option>
+            <option value="deepl">DeepL</option>
+            <option value="azure">Azure Translator</option>
+            <option value="google-cloud">Google Cloud Translation</option>
+            <option value="claude">Claude</option>
+            <option value="gemini">Gemini</option>
+          </select>
+        </div>
+
+        <div class="key-row" id="keyRow" hidden>
+          <input
+            type="password"
+            id="apiKey"
+            placeholder="API key"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <input
+            type="text"
+            id="region"
+            placeholder="Azure region, e.g. westeurope"
+            autocomplete="off"
+            spellcheck="false"
+            hidden
+          />
+          <p class="key-note">
+            <a id="keyLink" target="_blank" rel="noopener">Get a key</a>.
+            Your key is sent with this request, used only for this translation,
+            and never stored.
+          </p>
+        </div>
+
         <div class="upload-area">
           <div class="drop-zone" id="dropZone">
             <svg
@@ -760,10 +829,10 @@
           <p class="upload-note">
             Your PDF is processed on my server and not stored after translation.
             The first request may take a minute while the server wakes up.
-            Translation speed depends on document length, as each text block is
-            sent sequentially to Google Translate's free API. The server runs on
-            a free hosting tier, so processing is slower than a dedicated
-            machine.
+            Translation speed depends on document length and the engine. The
+            server runs on a free hosting tier, so processing is slower than a
+            dedicated machine. The command-line tool can also translate with a
+            local model through Ollama or Apple's on-device model.
           </p>
         </div>
       </section>
@@ -775,7 +844,8 @@
           The tool reads PDF text spans directly and classifies each one as
           either translatable text or mathematical notation based on the
           embedded font (e.g. CMMI, CMSY, CMEX for math). Text spans are sent to
-          Google Translate with placeholder tokens where math appears. The
+          the selected translation engine with placeholder tokens where math
+          appears. The
           translated text is then re-rendered into the PDF using CMU Serif and
           Latin Modern Math, keeping all output as searchable vector text.
         </p>
@@ -865,6 +935,26 @@
       const dropZone = document.getElementById("dropZone");
       const fileInput = document.getElementById("fileInput");
       const sourceLang = document.getElementById("sourceLang");
+      const engineSelect = document.getElementById("engine");
+      const keyRow = document.getElementById("keyRow");
+      const apiKeyInput = document.getElementById("apiKey");
+      const regionInput = document.getElementById("region");
+      const keyLink = document.getElementById("keyLink");
+
+      const KEY_LINKS = {
+        deepl: "https://www.deepl.com/pro-api",
+        azure: "https://azure.microsoft.com/en-us/products/ai-services/ai-translator",
+        "google-cloud": "https://cloud.google.com/translate",
+        claude: "https://platform.claude.com/",
+        gemini: "https://aistudio.google.com/apikey",
+      };
+
+      engineSelect.addEventListener("change", () => {
+        const engine = engineSelect.value;
+        keyRow.hidden = !(engine in KEY_LINKS);
+        regionInput.hidden = engine !== "azure";
+        keyLink.href = KEY_LINKS[engine] || "";
+      });
 
       // Store original drop zone HTML for reset
       const originalDropHTML = dropZone.innerHTML;
@@ -925,6 +1015,11 @@
 
         const formData = new FormData();
         formData.append("file", file);
+        formData.append("engine", engineSelect.value);
+        if (!keyRow.hidden) {
+          formData.append("api_key", apiKeyInput.value.trim());
+          formData.append("region", regionInput.value.trim());
+        }
 
         const src = sourceLang.value;
 
