@@ -16,7 +16,8 @@ SHARED_ROMAN_FONT_RE = re.compile(
 )
 
 # Whitespace and punctuation in a shared roman font belong to whichever of
-# text or math follows them.
+# text or math follows them. Other shared roman spans without words (digits,
+# single letters, operators) are text only between text on both sides.
 SEPARATOR_RE = re.compile(r"[\s,.;:!?]*")
 
 # OT1 fonts have no accented letters, so TeX stacks a spacing accent glyph on
@@ -75,18 +76,25 @@ def _has_words(text: str) -> bool:
     return any(word not in MATH_OPERATOR_NAMES for word in words)
 
 
-def _is_separator(span: "Span") -> bool:
-    return bool(SHARED_ROMAN_FONT_RE.search(span.font)) and bool(SEPARATOR_RE.fullmatch(span.text))
+def _resolve_wordless_spans(spans: list["Span"]):
+    """Decide text or math for shared roman spans without words from their neighbors."""
+    wordless = [bool(SHARED_ROMAN_FONT_RE.search(s.font)) and not s.is_text for s in spans]
+    separator = [w and bool(SEPARATOR_RE.fullmatch(s.text)) for w, s in zip(wordless, spans)]
 
-
-def _assign_separators(spans: list["Span"]):
-    """Mark separator spans as text when the next non-separator span is text."""
-    decided = [s for s in spans if not _is_separator(s)]
     for i, span in enumerate(spans):
-        if not _is_separator(span):
+        if not wordless[i] or separator[i]:
             continue
-        following = [s for s in spans[i + 1:] if not _is_separator(s)]
-        neighbor = following[0] if following else (decided[-1] if decided else None)
+        prev = next((spans[j] for j in range(i - 1, -1, -1) if not wordless[j]), None)
+        following = next((spans[j] for j in range(i + 1, len(spans)) if not wordless[j]), None)
+        neighbors = [n for n in (prev, following) if n is not None]
+        span.is_text = bool(neighbors) and all(n.is_text for n in neighbors)
+
+    for i, span in enumerate(spans):
+        if not separator[i]:
+            continue
+        following = next((spans[j] for j in range(i + 1, len(spans)) if not separator[j]), None)
+        prev = next((spans[j] for j in range(i - 1, -1, -1) if not separator[j]), None)
+        neighbor = following or prev
         span.is_text = neighbor is not None and neighbor.is_text
 
 
@@ -354,10 +362,10 @@ def extract_lines(doc) -> list[TranslatableLine]:
             for line_data in merged_block_lines:
                 spans = []
                 for s in line_data["spans"]:
-                    is_text = is_text_span(s["font"], s["text"], roman_is_text)
                     text = s["text"]
-                    if is_text and roman_is_text:
+                    if roman_is_text and SHARED_ROMAN_FONT_RE.search(s["font"]):
                         text = _compose_accents(text)
+                    is_text = is_text_span(s["font"], text, roman_is_text)
                     spans.append(Span(
                         text=text,
                         font=s["font"],
@@ -370,7 +378,7 @@ def extract_lines(doc) -> list[TranslatableLine]:
                 if not spans:
                     continue
                 if roman_is_text:
-                    _assign_separators(spans)
+                    _resolve_wordless_spans(spans)
 
                 # Build template with math placeholders.
                 # Merge consecutive math spans into single placeholders so

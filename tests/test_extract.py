@@ -1,7 +1,9 @@
 import pytest
 
 from conftest import FONT_VARIANTS, open_fixture
-from translator.extract import _compose_accents, _is_english_block, extract_lines
+from translator.extract import (
+    Span, _compose_accents, _is_english_block, _resolve_wordless_spans, extract_lines,
+)
 
 
 @pytest.mark.parametrize("variant", FONT_VARIANTS)
@@ -47,3 +49,22 @@ def test_detects_english_blocks():
     assert _is_english_block(english)
     assert not _is_english_block(french)
     assert not _is_english_block(german)
+
+
+def test_wordless_roman_spans_follow_their_neighbors():
+    def span(text, font, is_text):
+        return Span(text=text, font=font, size=10, bbox=(0, 0, 1, 1),
+                    ink_bbox=(0, 0, 1, 1), origin=(0, 1), is_text=is_text)
+
+    spans = [
+        span("along with", "CMR10", True), span(" ", "CMR10", False),
+        span("a", "CMR10", False), span(" ", "CMR10", False),
+        span("correction to", "CMR10", True), span(" ", "CMR10", False),
+        span("f", "CMMI10", False), span("(", "CMR10", False),
+        span("x", "CMMI10", False), span(")", "CMR10", False),
+    ]
+    _resolve_wordless_spans(spans)
+
+    assert [s.is_text for s in spans] == [
+        True, True, True, True, True, False, False, False, False, False,
+    ]
