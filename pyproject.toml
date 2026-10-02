@@ -10,11 +10,19 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
     "python-multipart>=0.0.20",
+    "anthropic>=1.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+apple = [
+    "apple-fm-sdk>=0.2; sys_platform == 'darwin'",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "httpx>=0.27",
 ]
 
 [build-system]
@@ -22,7 +30,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["translator"]
+packages = ["translator", "translator.engines"]
 py-modules = ["main", "server"]
 
 [tool.setuptools.package-data]
