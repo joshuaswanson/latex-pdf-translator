@@ -10,12 +10,20 @@ from translator.charmap import TERM_FIXES
 from translator.extract import TranslatableLine, Span
 
 
-# Google Translate batch size (max 5000 chars per request)
-BATCH_CHARS = 4800
+# Google Translate rejects requests of 5000 characters or more
+MAX_GROUP_CHARS = 4500
+MAX_ATTEMPTS = 3
 
 # Math placeholder format: XXXM0XXX, XXXM1XXX, etc.
 # Google Translate preserves these as opaque tokens
 MATH_MARKER_RE = re.compile(r'XXXM(\d+)XXX', re.IGNORECASE)
+
+ENGLISH_CODES = {"en", "english"}
+
+TERM_FIX_PATTERNS = [
+    (re.compile(rf"\b{pattern}", re.IGNORECASE), replacement)
+    for pattern, replacement in TERM_FIXES.items()
+]
 
 
 def _prepare_gt_text(text: str) -> str:
@@ -27,14 +35,30 @@ def _prepare_gt_text(text: str) -> str:
     return gt_text
 
 
-def _postprocess_translation(text: str) -> str:
+def _postprocess_translation(text: str, target: str) -> str:
     """Convert markers back and apply fixes to a translated string."""
     text = MATH_MARKER_RE.sub(r'{M\1}', text)
     # Clean up extra spaces around markers
     text = re.sub(r'\s+(\{M\d+\})\s+', r' \1 ', text)
     text = re.sub(r'\s+(\{M\d+\})-', r' \1-', text)
-    text = _fix_terminology(text)
+    if target.lower() in ENGLISH_CODES:
+        text = _fix_terminology(text)
     return text
+
+
+def _fix_terminology(text: str) -> str:
+    """Fix known Google Translate mistakes for English math terminology."""
+    for pattern, replacement in TERM_FIX_PATTERNS:
+        text = pattern.sub(lambda m: _match_case(m.expand(replacement), m.group(0)), text)
+    return text
+
+
+def _match_case(replacement: str, matched: str) -> str:
+    if matched.isupper():
+        return replacement.upper()
+    if matched[0].isupper():
+        return replacement[0].upper() + replacement[1:]
+    return replacement
 
 
 def _group_paragraphs(lines: list[TranslatableLine]) -> list[list[int]]:
@@ -43,10 +67,12 @@ def _group_paragraphs(lines: list[TranslatableLine]) -> list[list[int]]:
     Returns list of groups, where each group is a list of indices into `lines`.
     Only merges lines that have NO math spans (pure text) -- lines with math
     markers stay standalone to avoid marker redistribution issues.
-    TOC lines and headings also stay as single-line groups.
+    TOC lines and headings also stay as single-line groups. A group grows to
+    at most MAX_GROUP_CHARS characters.
     """
     groups = []
     current_group = []
+    current_len = 0
 
     def _is_mergeable(line):
         """A line can be merged into a paragraph only if it has no math."""
@@ -75,14 +101,18 @@ def _group_paragraphs(lines: list[TranslatableLine]) -> list[list[int]]:
             similar_x = abs(line.bbox[0] - prev.bbox[0]) < 20
             consecutive_y = (line.bbox[1] - prev.bbox[3]) < prev.spans[0].size
             same_size = abs(line.spans[0].size - prev.spans[0].size) < 0.5
+            fits = current_len + 1 + len(line.template) <= MAX_GROUP_CHARS
 
-            if same_page and similar_x and consecutive_y and same_size:
+            if same_page and similar_x and consecutive_y and same_size and fits:
                 current_group.append(i)
+                current_len += 1 + len(line.template)
             else:
                 groups.append(current_group)
                 current_group = [i]
+                current_len = len(line.template)
         else:
             current_group = [i]
+            current_len = len(line.template)
 
     if current_group:
         groups.append(current_group)
@@ -216,6 +246,24 @@ def _save_cache(cache_path: Path, cache: dict):
     cache_path.write_text(json.dumps(cache, ensure_ascii=False))
 
 
+def _cache_key(text: str, source: str, target: str) -> str:
+    return hashlib.md5(f"{source}:{target}:{text}".encode()).hexdigest()
+
+
+def _translate_with_retry(translator: GoogleTranslator, text: str) -> str | None:
+    """Translate one string, returning None if every attempt fails."""
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            return translator.translate(text)
+        except Exception as e:
+            if attempt == MAX_ATTEMPTS:
+                print(f"    WARNING: translation failed after {MAX_ATTEMPTS} attempts: {e}")
+                return None
+            wait = 2 ** attempt
+            print(f"    Retry {attempt}/{MAX_ATTEMPTS - 1} after {wait}s: {e}")
+            time.sleep(wait)
+
+
 def translate_lines(lines: list[TranslatableLine],
                     cache_path: Path | None = None,
                     source: str = 'fr',
@@ -248,11 +296,11 @@ def translate_lines(lines: list[TranslatableLine],
             group_math.append(merged_ms)
 
     # Separate cached vs uncached
-    to_translate = []  # (group_idx, text)
+    to_translate = []  # (group_idx, text, cache_key)
     translated_groups = []  # (group_idx, result)
 
     for i, text in enumerate(group_texts):
-        cache_key = hashlib.md5(text.encode()).hexdigest()
+        cache_key = _cache_key(text, source, target)
         if cache_key in cache:
             translated_groups.append((i, cache[cache_key]))
         else:
@@ -263,55 +311,20 @@ def translate_lines(lines: list[TranslatableLine],
     else:
         print(f"  All {len(translated_groups)} translations cached")
 
-    # Translate uncached in batches with retry
-    batch = []
-    batch_len = 0
-    completed = 0
-    total_to_translate = len(to_translate)
+    if progress_callback and to_translate:
+        progress_callback(0, len(to_translate))
 
-    if progress_callback and total_to_translate > 0:
-        progress_callback(0, total_to_translate)
-
-    for i, text, cache_key in to_translate:
-        batch.append((i, text, cache_key))
-        batch_len += len(text)
-
-        if batch_len >= BATCH_CHARS or (i, text, cache_key) == to_translate[-1]:
-            batch_texts = [t for _, t, _ in batch]
-            results = None
-
-            batch_failed = False
-            for attempt in range(3):
-                try:
-                    results = translator.translate_batch(batch_texts)
-                    break
-                except Exception as e:
-                    if attempt < 2:
-                        wait = 2 ** (attempt + 1)
-                        print(f"    Retry {attempt + 1}/3 after {wait}s: {e}")
-                        time.sleep(wait)
-                    else:
-                        print(f"    WARNING: translation failed after 3 attempts: {e}")
-                        results = batch_texts
-                        batch_failed = True
-
-            for (idx, _orig, ck), result in zip(batch, results):
-                # On failure (whole batch or an individual None result) fall back
-                # to the untranslated original, but do NOT cache it, so the line
-                # is retried on the next run instead of being poisoned.
-                if batch_failed or result is None:
-                    translated_groups.append((idx, result if result is not None else _orig))
-                    continue
-                translated_groups.append((idx, result))
-                cache[ck] = result
-
-            completed += len(batch)
-            if progress_callback:
-                progress_callback(completed, total_to_translate)
-
-            batch = []
-            batch_len = 0
-            time.sleep(0.3)
+    for completed, (i, text, cache_key) in enumerate(to_translate, 1):
+        result = _translate_with_retry(translator, text)
+        if result is None:
+            # Fall back to the untranslated text without caching it, so the
+            # next run retries this group.
+            translated_groups.append((i, text))
+        else:
+            translated_groups.append((i, result))
+            cache[cache_key] = result
+        if progress_callback:
+            progress_callback(completed, len(to_translate))
 
     # Save updated cache
     if cache_path:
@@ -323,7 +336,7 @@ def translate_lines(lines: list[TranslatableLine],
     # Split paragraph translations back to per-line
     translations = [""] * len(lines)
     for (group_idx, translated_text), group in zip(translated_groups, groups):
-        processed = _postprocess_translation(translated_text)
+        processed = _postprocess_translation(translated_text, target)
 
         if len(group) == 1:
             translations[group[0]] = processed
@@ -336,9 +349,3 @@ def translate_lines(lines: list[TranslatableLine],
 
     return translations
 
-
-def _fix_terminology(text: str) -> str:
-    """Fix known Google Translate mistakes for math terminology."""
-    for wrong, right in TERM_FIXES.items():
-        text = text.replace(wrong, right)
-    return text
