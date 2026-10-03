@@ -3,7 +3,8 @@ import pytest
 
 from conftest import FONT_VARIANTS, FakeEngine, fixture_pdf_bytes
 from translator.pipeline import NoTranslatableTextError, translate_pdf
-from translator.render import _find_extent
+from translator.extract import Span
+from translator.render import _find_extent, _find_stacked_spans
 
 
 @pytest.mark.parametrize("variant", FONT_VARIANTS)
@@ -46,3 +47,17 @@ def test_link_extent_matches_the_column_containing_the_link():
 
     assert _find_extent(extents, 0, pymupdf.Rect(400, 95, 450, 105)) == right
     assert _find_extent(extents, 0, pymupdf.Rect(60, 95, 90, 105)) == left
+
+
+def test_fraction_after_an_opening_delimiter_is_stacked():
+    def span(text, font, bbox, baseline):
+        return Span(text=text, font=font, size=7, bbox=bbox, ink_bbox=bbox,
+                    origin=(bbox[0], baseline), is_text=False)
+
+    group = [
+        span("(", "CMEX10", (312.1, 171.6, 316.7, 181.5), 172.2),
+        span("16", "CMR7", (316.7, 166.8, 325.8, 177.9), 172.2),
+        span("t", "CMMI7", (320.3, 178.3, 323.4, 185.2), 183.0),
+    ]
+
+    assert _find_stacked_spans(group) == {1, 2}

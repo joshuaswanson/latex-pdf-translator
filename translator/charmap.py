@@ -1,26 +1,3 @@
-# CMEX control characters -> Unicode equivalents
-CMEX_CHAR_MAP = {
-    "\x00": "(", "\x01": ")", "\x02": "[", "\x03": "]",
-    "\x04": "\u230A", "\x05": "\u230B",  # floor brackets
-    "\x06": "\u2308", "\x07": "\u2309",  # ceiling brackets
-    "\x08": "{", "\x09": "}",
-    "\x0A": "\u27E8", "\x0B": "\u27E9",  # angle brackets
-    "\x0C": "|",
-    "\x10": "\u239B", "\x11": "\u239D",  # left paren top/bottom
-    "\x12": "\u239E", "\x13": "\u23A0",  # right paren top/bottom
-    "(": "(", " ": " ",
-    "P": "\u2211",  # summation (text size)
-    "Q": "\u220F",  # product (text size)
-    "R": "\u222B",  # integral (text size)
-    "X": "\u2211",  # summation (display size)
-    "Y": "\u220F",  # product (display size)
-    "Z": "\u222B",  # integral (display size)
-    "\uf8f1": "\u23A7",  # left curly brace upper
-    "\uf8f2": "\u23A8",  # left curly brace middle
-    "\uf8f3": "\u23A9",  # left curly brace lower
-    "\uf8f4": "\u23AB",  # right curly brace upper
-}
-
 # rsfs script letter mapping (rsfs extracts as plain letters, need Unicode script)
 RSFS_CHAR_MAP = {
     "A": "\U0001D49C", "B": "\u212C", "C": "\U0001D49E",

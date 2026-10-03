@@ -4,7 +4,7 @@ from pathlib import Path
 import pymupdf
 
 from translator.charmap import (
-    CMEX_CHAR_MAP, RSFS_CHAR_MAP, MATH_ITALIC_MAP, MATH_BOLD_MAP,
+    RSFS_CHAR_MAP, MATH_ITALIC_MAP, MATH_BOLD_MAP,
     EUFM_CHAR_MAP,
 )
 from translator.extract import Span, TranslatableLine
@@ -74,6 +74,11 @@ MATH_FONT_STYLE = {
 # full ascender-to-descender height.
 SCRIPT_GLYPH_PADDING = (1.5, 2.5, 1.5)
 TIGHT_GLYPH_PADDING = (0.3, 0.3, 0.3)
+
+# Opening delimiters, including CMEX's big ones. Sub- and superscripts never
+# attach to them, so a stacked pair right after one is a fraction.
+OPENING_DELIMITERS = set("([{\u27e8") | {"\x00", "\x02", "\x04", "\x06", "\x08", "\x0a",
+                                          "\x10", "\x11"}
 
 # Translated text that would overflow its block is condensed horizontally,
 # down to this fraction of its natural width.
@@ -462,6 +467,8 @@ def _find_stacked_spans(group: list[Span]) -> set[int]:
             left_edge = min(s1.bbox[0], s2.bbox[0])
             is_sub_super = any(
                 abs(group[gk].bbox[2] - left_edge) < 1.5
+                and group[gk].text.strip()
+                and group[gk].text.strip() not in OPENING_DELIMITERS
                 for gk in range(len(group)) if gk not in (gi, gj)
             )
             if not is_sub_super:
@@ -512,7 +519,6 @@ def _math_font_kind(font: str) -> str | None:
 def _map_math_text(text: str, font_kind: str) -> str:
     """Map math span text to Unicode characters renderable by Latin Modern Math."""
     char_map = {
-        "CMEX": CMEX_CHAR_MAP,
         "rsfs": RSFS_CHAR_MAP,
         "CMMI": MATH_ITALIC_MAP,
         "CMBX": MATH_BOLD_MAP,
@@ -579,8 +585,10 @@ def _render_math_span(page, orig_page, ms: Span, x: float,
     if kind in ("rsfs", "EUFM") and ms.text.strip():
         return _copy_original_glyph(page, orig_page, ms, x, extra_spans)
 
-    # For CMEX characters not in the mapping, copy from original
-    if kind == "CMEX" and any(ch not in CMEX_CHAR_MAP for ch in ms.text if ch.strip()):
+    # CMEX glyphs hang below their baseline and come in many sizes, so a
+    # Unicode equivalent typeset on that baseline lands too high. Copying the
+    # original keeps the exact size and position.
+    if kind == "CMEX" and ms.text.strip():
         return _copy_original_glyph(page, orig_page, ms, x)
 
     # CMSY combining characters (e.g. U+0338 "not" slash) need original glyph
