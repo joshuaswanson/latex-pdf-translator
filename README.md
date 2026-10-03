@@ -64,7 +64,6 @@ Run the tests with `uv run pytest`. They use small LaTeX fixtures in `tests/fixt
 ## Limitations
 
 - Lines that contain math are translated one line at a time, so sentences that span several lines lose context
-- Glyphs without a Unicode mapping (some CMEX delimiter fragments, script and Fraktur letters, small caps, unknown fonts) are copied from the original page
+- Big delimiters and operators (CMEX), script and Fraktur letters, small caps, and glyphs in unknown fonts are copied from the original page
 - Translated lines wider than their text column are condensed horizontally to at most 70% of their natural width; beyond that they overflow
 - Terminology fixes for common machine translation mistakes in math prose apply only to English output from the google, deepl, azure and google-cloud engines
-- Text before and after an inline fraction can land in separate PDF blocks; the two halves are then rendered independently and can overlap
