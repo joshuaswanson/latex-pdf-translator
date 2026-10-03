@@ -828,7 +828,9 @@
 
           <p class="upload-note">
             Your PDF is processed on my server and not stored after translation.
-            The first request may take a minute while the server wakes up.
+            With Google Translate, your browser sends the extracted text to
+            Google directly. The first request may take a minute while the
+            server wakes up.
             Translation speed depends on document length and the engine. The
             server runs on a free hosting tier, so processing is slower than a
             dedicated machine. The command-line tool can also translate with a
@@ -993,8 +995,13 @@
         if (fileInput.files[0]) uploadFile(fileInput.files[0]);
       });
 
+      const GOOGLE_URL =
+        "https://translate.googleapis.com/translate_a/single?client=gtx&dt=t";
+      const BROWSER_TRANSLATION_WORKERS = 2;
+      let jobStartTime = 0;
+
       async function uploadFile(file) {
-        // Show processing state
+        jobStartTime = Date.now();
         dropZone.className = "drop-zone processing";
         dropZone.innerHTML =
           '<div class="spinner"></div>' +
@@ -1013,45 +1020,57 @@
           }
         }, 5000);
 
+        // Google blocks the server, so the free engine translates in the browser
+        const inBrowser = engineSelect.value === "google";
         const formData = new FormData();
         formData.append("file", file);
-        formData.append("engine", engineSelect.value);
-        if (!keyRow.hidden) {
+        if (!inBrowser) {
+          formData.append("engine", engineSelect.value);
           formData.append("api_key", apiKeyInput.value.trim());
           formData.append("region", regionInput.value.trim());
         }
-
-        const src = sourceLang.value;
+        const query =
+          "?source=" + encodeURIComponent(sourceLang.value) + "&target=en";
 
         try {
           const res = await fetch(
-            API_BASE +
-              "/translate?source=" +
-              encodeURIComponent(src) +
-              "&target=en",
+            API_BASE + (inBrowser ? "/extract" : "/translate") + query,
             { method: "POST", body: formData },
           );
-
           clearTimeout(coldStartTimer);
-
-          if (!res.ok) {
-            const err = await res
-              .json()
-              .catch(() => ({ detail: "Upload failed" }));
-            throw new Error(err.detail || "Upload failed");
-          }
-
-          const { job_id } = await res.json();
-          pollStatus(job_id, file.name);
+          const data = await res
+            .json()
+            .catch(() => ({ detail: "Upload failed" }));
+          if (!res.ok) throw new Error(data.detail || "Upload failed");
+          pollStatus(data.job_id, file.name);
         } catch (e) {
           clearTimeout(coldStartTimer);
           showError(e.message);
         }
       }
 
-      async function pollStatus(jobId, filename) {
-        const startTime = Date.now();
+      function showProgress(stage, progress, total) {
+        let progressHtml = "";
+        if (total > 0) {
+          const pct = Math.round((progress / total) * 100);
+          progressHtml =
+            '<div class="progress-bar"><div class="progress-fill" style="width:' +
+            pct +
+            '%"></div></div>';
+        }
+        const elapsed = Math.round((Date.now() - jobStartTime) / 1000);
+        dropZone.innerHTML =
+          '<div class="spinner"></div>' +
+          "<h3>" +
+          escapeHtml(stage) +
+          "</h3>" +
+          progressHtml +
+          '<p style="color: var(--ink-faint)">' +
+          elapsed +
+          "s elapsed</p>";
+      }
 
+      async function pollStatus(jobId, filename) {
         const poll = async () => {
           try {
             const res = await fetch(API_BASE + "/status/" + jobId);
@@ -1060,27 +1079,11 @@
               showError(data.detail || "Translation failed");
               return;
             }
-            const elapsed = Math.round((Date.now() - startTime) / 1000);
-
             if (data.status === "processing") {
-              let progressHtml = "";
-              if (data.total > 0) {
-                const pct = Math.round((data.progress / data.total) * 100);
-                progressHtml =
-                  '<div class="progress-bar"><div class="progress-fill" style="width:' +
-                  pct +
-                  '%"></div></div>';
-              }
-              dropZone.innerHTML =
-                '<div class="spinner"></div>' +
-                "<h3>" +
-                escapeHtml(data.stage) +
-                "</h3>" +
-                progressHtml +
-                '<p style="color: var(--ink-faint)">' +
-                elapsed +
-                "s elapsed</p>";
+              showProgress(data.stage, data.progress, data.total);
               setTimeout(poll, 2000);
+            } else if (data.status === "awaiting_translation") {
+              translateInBrowser(jobId, filename);
             } else if (data.status === "done") {
               showDone(jobId, filename);
             } else {
@@ -1092,6 +1095,95 @@
         };
 
         poll();
+      }
+
+      async function translateInBrowser(jobId, filename) {
+        try {
+          const res = await fetch(API_BASE + "/segments/" + jobId);
+          const job = await res.json();
+          if (!res.ok) throw new Error(job.detail || "Translation failed");
+
+          const segments = job.segments;
+          const translations = new Array(segments.length).fill(null);
+          let next = 0;
+          let done = 0;
+          showProgress("Translating in your browser...", 0, segments.length);
+          const worker = async () => {
+            while (next < segments.length) {
+              const i = next++;
+              translations[i] = await googleTranslate(
+                segments[i],
+                job.source,
+                job.target,
+              );
+              done++;
+              showProgress(
+                "Translating in your browser... (" +
+                  done +
+                  "/" +
+                  segments.length +
+                  ")",
+                done,
+                segments.length,
+              );
+            }
+          };
+          await Promise.all(
+            Array.from({ length: BROWSER_TRANSLATION_WORKERS }, worker),
+          );
+
+          const renderRes = await fetch(API_BASE + "/render/" + jobId, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ translations }),
+          });
+          const data = await renderRes.json().catch(() => ({}));
+          if (!renderRes.ok) throw new Error(data.detail || "Rendering failed");
+          pollStatus(jobId, filename);
+        } catch (e) {
+          showError(e.message);
+        }
+      }
+
+      // Math placeholders {M0} travel through Google as opaque XXXM0XXX tokens
+      function toMarkers(text) {
+        return text
+          .replace(/\{M(\d+)\}/g, "XXXM$1XXX")
+          .replace(/([A-Za-zÀ-ÿ])(XXXM\d+XXX)/g, "$1 $2")
+          .replace(/(XXXM\d+XXX)([A-Za-zÀ-ÿ])/g, "$1 $2");
+      }
+
+      function fromMarkers(text) {
+        return text.replace(/XXXM(\d+)XXX/gi, "{M$1}");
+      }
+
+      async function googleTranslate(text, source, target) {
+        const url = GOOGLE_URL + "&sl=" + source + "&tl=" + target;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            const res = await fetch(url, {
+              method: "POST",
+              body: new URLSearchParams({ q: toMarkers(text) }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              return fromMarkers(
+                (data[0] || []).map((segment) => segment[0] || "").join(""),
+              );
+            }
+            if (res.status === 429 && attempt === 3) {
+              throw new Error(
+                "Google Translate is rate limiting requests from your network. Try again later.",
+              );
+            }
+          } catch (e) {
+            if (e.message.startsWith("Google Translate")) throw e;
+          }
+          if (attempt < 3) {
+            await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+          }
+        }
+        return null;
       }
 
       function showDone(jobId, filename) {
