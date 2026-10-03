@@ -19,13 +19,6 @@ FONT_FILES = {
     "bolditalic": FONT_DIR / "cmunbi.otf",
 }
 
-FONT_NAMES = {
-    "regular": "CMUSerif",
-    "bold": "CMUSerifBold",
-    "italic": "CMUSerifItalic",
-    "bolditalic": "CMUSerifBoldItalic",
-}
-
 FONT_OBJECTS = {
     style: pymupdf.Font(fontfile=str(path))
     for style, path in FONT_FILES.items()
@@ -34,7 +27,6 @@ FONT_OBJECTS = {
 # Latin Modern Math: comprehensive math font from the CM family.
 # Has 99.9% coverage of all math symbols used in LaTeX PDFs.
 MATH_FONT_FILE = FONT_DIR / "latinmodern-math.otf"
-MATH_FONT_NAME = "LMMath"
 MATH_FONT = pymupdf.Font(fontfile=str(MATH_FONT_FILE))
 
 # Map LaTeX math fonts (Computer Modern and their Latin Modern equivalents)
@@ -83,6 +75,36 @@ OPENING_DELIMITERS = set("([{\u27e8") | {"\x00", "\x02", "\x04", "\x06", "\x08",
 # Translated text that would overflow its block is condensed horizontally,
 # down to this fraction of its natural width.
 MIN_TEXT_SCALE = 0.7
+
+
+class PageText:
+    """Collects a page's text and writes it in one go.
+
+    page.insert_text rescans every font resource on the page on each call,
+    which dominated rendering time on pages with many copied glyphs.
+    """
+
+    def __init__(self, rect: pymupdf.Rect):
+        self._rect = rect
+        self._writer = pymupdf.TextWriter(rect)
+        self._has_text = False
+        self._condensed = []
+
+    def add(self, point: tuple, text: str, font: pymupdf.Font, fontsize: float):
+        self._writer.append(point, text, font=font, fontsize=fontsize)
+        self._has_text = True
+
+    def condensed(self, fixpoint: pymupdf.Point, scale: float) -> pymupdf.TextWriter:
+        """A writer whose text is condensed horizontally by `scale` around `fixpoint`."""
+        writer = pymupdf.TextWriter(self._rect)
+        self._condensed.append((writer, (fixpoint, pymupdf.Matrix(scale, 1))))
+        return writer
+
+    def write(self, page):
+        if self._has_text:
+            self._writer.write_text(page)
+        for writer, morph in self._condensed:
+            writer.write_text(page, morph=morph)
 
 
 def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
@@ -166,20 +188,10 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
 
         # (Link colors are fixed in a post-processing pass after save/reload)
 
-        # Register fonts AFTER redactions (redactions can remove font resources)
-        for style, name in FONT_NAMES.items():
-            page.insert_font(
-                fontname=name,
-                fontfile=str(FONT_FILES[style]),
-            )
-        page.insert_font(
-            fontname=MATH_FONT_NAME,
-            fontfile=str(MATH_FONT_FILE),
-        )
-
         # Phase 2: Re-render translated text + math glyphs
+        page_text = PageText(page.rect)
         for line, translated in page_lines[page_idx]:
-            text_end_x = _render_line_content(page, orig_page, line, translated)
+            text_end_x = _render_line_content(page, orig_page, line, translated, page_text)
             # Record rendered text extent for link rectangle adjustment
             y_mid = (line.bbox[1] + line.bbox[3]) / 2
             orig_x0, orig_x1 = line.bbox[0], line.bbox[2]
@@ -187,6 +199,7 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
                 (orig_x0, orig_x1, orig_x0, text_end_x))
             changed += 1
 
+        page_text.write(page)
         for box in collateral:
             page.show_pdf_page(box, glyph_doc, page_idx, clip=box)
 
@@ -412,7 +425,7 @@ def _fix_style_boundaries(segments):
 
 
 def _render_line_content(page, orig_page, line: TranslatableLine,
-                         translated: str) -> float:
+                         translated: str, page_text: PageText) -> float:
     """Render translated text + math glyphs onto the page.
     Returns x position after rendering content (before TOC dots)."""
     x0, y0, x1, y1 = line.bbox
@@ -440,7 +453,9 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
         right_limit = _toc_text_limit(line, fontsize, toc_font_obj)
     text_scale = _fit_text_scale(line, styled_segments, fontsize, right_limit - x0)
 
-    # Render from left to right
+    # Render from left to right. Condensed text goes to a writer scaled around
+    # the line start, so each segment is placed at its unscaled position.
+    condensed = None
     x = x0
     for text, style in styled_segments:
         if style == "math":
@@ -450,28 +465,25 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
             idx = int(m.group(1))
             if idx >= len(line.math_spans):
                 continue
-            x += _render_math_group(page, orig_page, line.math_spans[idx], x)
+            x += _render_math_group(page, orig_page, line.math_spans[idx], x, page_text)
         else:
             if not text:
                 continue
             font_obj = FONT_OBJECTS[style]
-            origin = pymupdf.Point(x, baseline_y)
-            page.insert_text(
-                origin,
-                text,
-                fontname=FONT_NAMES[style],
-                fontsize=fontsize,
-                color=(0, 0, 0),
-                morph=(origin, pymupdf.Matrix(text_scale, 1)) if text_scale < 1 else None,
-            )
+            if text_scale < 1:
+                if condensed is None:
+                    condensed = page_text.condensed(pymupdf.Point(x0, baseline_y), text_scale)
+                condensed.append((x0 + (x - x0) / text_scale, baseline_y), text,
+                                 font=font_obj, fontsize=fontsize)
+            else:
+                page_text.add((x, baseline_y), text, font_obj, fontsize)
             x += font_obj.text_length(text, fontsize=fontsize) * text_scale
 
     text_end_x = x  # Position after title text, before dots
 
     # For TOC lines, add dot leaders and page number
     if line.is_toc:
-        _render_toc_dots(page, x, baseline_y, fontsize, FONT_NAMES[line.font_style],
-                         toc_font_obj, line)
+        _render_toc_dots(page_text, x, baseline_y, fontsize, toc_font_obj, line)
 
     return text_end_x
 
@@ -485,7 +497,8 @@ def _fit_text_scale(line: TranslatableLine, styled_segments: list,
         if style == "math":
             m = re.match(r'\{M(\d+)\}', text)
             if m and int(m.group(1)) < len(line.math_spans):
-                math_width += _render_math_group(None, None, line.math_spans[int(m.group(1))], 0)
+                math_width += _render_math_group(None, None, line.math_spans[int(m.group(1))], 0,
+                                                 None)
         else:
             text_width += FONT_OBJECTS[style].text_length(text, fontsize=fontsize)
     if text_width == 0 or text_width + math_width <= available + 1:
@@ -501,7 +514,8 @@ def _toc_text_limit(line: TranslatableLine, fontsize: float, font_obj) -> float:
     return right_edge - 4 - 3 * font_obj.text_length(". ", fontsize=fontsize)
 
 
-def _render_math_group(page, orig_page, group: list[Span], x: float) -> float:
+def _render_math_group(page, orig_page, group: list[Span], x: float,
+                       page_text: PageText | None) -> float:
     """Render one math placeholder's spans starting at x, returning width consumed.
 
     With page=None nothing is drawn and only the width is computed.
@@ -524,7 +538,7 @@ def _render_math_group(page, orig_page, group: list[Span], x: float) -> float:
         if gi in stacked:
             if frac_x_start is None:
                 frac_x_start = x
-            rendered = _render_math_span(page, orig_page, ms, frac_x_start, extra_spans)
+            rendered = _render_math_span(page, orig_page, ms, frac_x_start, extra_spans, page_text)
             frac_max_width = max(frac_max_width, rendered)
         else:
             # Flush any pending fraction width
@@ -534,7 +548,7 @@ def _render_math_group(page, orig_page, group: list[Span], x: float) -> float:
                 x = frac_x_start + frac_max_width + 1.5
                 frac_x_start = None
                 frac_max_width = 0
-            x += _render_math_span(page, orig_page, ms, x, extra_spans)
+            x += _render_math_span(page, orig_page, ms, x, extra_spans, page_text)
     # Flush final fraction (if stacked spans are at end of group)
     if frac_x_start is not None:
         _draw_fraction_bars(page, group, stacked, frac_x_start,
@@ -633,8 +647,8 @@ def _copy_original_glyph(page, orig_page, ms: Span, x: float,
                          padding: tuple = SCRIPT_GLYPH_PADDING) -> float:
     """Copy a glyph from the original page to preserve its exact appearance.
 
-    Used for fonts like rsfs and EUFM where pymupdf can't render the Unicode
-    equivalents via insert_text (supplementary plane limitation).
+    Used for glyphs whose Unicode equivalents would look different or land in
+    the wrong place, such as rsfs script and EUFM Fraktur letters.
 
     If extra_spans is provided, the source/dest rects are expanded to include
     those spans (e.g. superscripts attached to a script letter like C^r).
@@ -669,7 +683,7 @@ def _copy_original_glyph(page, orig_page, ms: Span, x: float,
 
 
 def _render_math_span(page, orig_page, ms: Span, x: float,
-                      extra_spans: list[Span]) -> float:
+                      extra_spans: list[Span], page_text: PageText | None) -> float:
     """Render a single math span as vector text, returning width consumed."""
     kind = _math_font_kind(ms.font)
     style = MATH_FONT_STYLE.get(kind)
@@ -679,8 +693,8 @@ def _render_math_span(page, orig_page, ms: Span, x: float,
             return pymupdf.Rect(ms.bbox).width
         return _copy_original_glyph(page, orig_page, ms, x, padding=TIGHT_GLYPH_PADDING)
 
-    # For rsfs (script) and EUFM (fraktur) fonts, copy the original glyph
-    # because pymupdf can't render supplementary plane Unicode via insert_text
+    # Latin Modern Math's script and Fraktur letters look different from rsfs
+    # and EUFM, so copy the original glyph
     if kind in ("rsfs", "EUFM") and ms.text.strip():
         return _copy_original_glyph(page, orig_page, ms, x, extra_spans)
 
@@ -698,11 +712,9 @@ def _render_math_span(page, orig_page, ms: Span, x: float,
 
     # Determine font to use
     if style == "math":
-        m_font_name = MATH_FONT_NAME
         m_font_obj = MATH_FONT
         text = _map_math_text(ms.text, kind)
     else:
-        m_font_name = FONT_NAMES[style]
         m_font_obj = FONT_OBJECTS[style]
         text = ms.text
 
@@ -710,14 +722,8 @@ def _render_math_span(page, orig_page, ms: Span, x: float,
         return m_font_obj.text_length(text, fontsize=ms.size) if text else 0
 
     # The math span keeps its original baseline (sub/superscripts sit off the line)
-    if page is not None:
-        page.insert_text(
-            pymupdf.Point(x, ms.origin[1]),
-            text,
-            fontname=m_font_name,
-            fontsize=ms.size,
-            color=(0, 0, 0),
-        )
+    if page_text is not None:
+        page_text.add((x, ms.origin[1]), text, m_font_obj, ms.size)
     return m_font_obj.text_length(text, fontsize=ms.size)
 
 
@@ -742,9 +748,8 @@ def _draw_fraction_bars(page, group: list, stacked: set,
     shape.commit()
 
 
-def _render_toc_dots(page, x_after_text: float, baseline_y: float,
-                     fontsize: float, font_name: str, font_obj,
-                     line: TranslatableLine):
+def _render_toc_dots(page_text: PageText, x_after_text: float, baseline_y: float,
+                     fontsize: float, font_obj, line: TranslatableLine):
     """Render dot leaders and right-aligned page number."""
     right_edge = line.bbox[2]
     dot_unit = font_obj.text_length(". ", fontsize=fontsize)
@@ -754,35 +759,13 @@ def _render_toc_dots(page, x_after_text: float, baseline_y: float,
         pn_width = font_obj.text_length(line.toc_page_num, fontsize=fontsize)
         pn_x = right_edge - pn_width
         dots_end = pn_x - 4
-
-        if dots_end > dots_start + dot_unit * 3:
-            n_dots = int((dots_end - dots_start) / dot_unit)
-            page.insert_text(
-                pymupdf.Point(dots_start, baseline_y),
-                ". " * n_dots,
-                fontname=font_name,
-                fontsize=fontsize,
-                color=(0, 0, 0),
-            )
-
-        page.insert_text(
-            pymupdf.Point(pn_x, baseline_y),
-            line.toc_page_num,
-            fontname=font_name,
-            fontsize=fontsize,
-            color=(0, 0, 0),
-        )
+        page_text.add((pn_x, baseline_y), line.toc_page_num, font_obj, fontsize)
     else:
         dots_end = right_edge - 2
-        if dots_end > dots_start + dot_unit * 3:
-            n_dots = int((dots_end - dots_start) / dot_unit)
-            page.insert_text(
-                pymupdf.Point(dots_start, baseline_y),
-                ". " * n_dots,
-                fontname=font_name,
-                fontsize=fontsize,
-                color=(0, 0, 0),
-            )
+
+    if dots_end > dots_start + dot_unit * 3:
+        n_dots = int((dots_end - dots_start) / dot_unit)
+        page_text.add((dots_start, baseline_y), ". " * n_dots, font_obj, fontsize)
 
 
 def _search_link_text(page, text: str, orig_rect) -> pymupdf.Rect | None:
