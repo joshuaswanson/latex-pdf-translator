@@ -78,3 +78,20 @@ def test_render_rejects_wrong_number_of_translations():
     response = client.post(f"/render/{job_id}", json={"translations": ["only one"]})
 
     assert response.status_code == 400
+
+
+def test_rejects_pdfs_over_the_page_limit():
+    with pymupdf.open() as doc:
+        for _ in range(151):
+            doc.new_page()
+        long_pdf = doc.tobytes()
+    response = client.post("/extract?source=fr&target=en",
+                           files={"file": ("long.pdf", long_pdf, "application/pdf")})
+    assert response.status_code == 400
+    assert "150 pages" in response.json()["detail"]
+
+
+def test_rejects_files_that_are_not_pdfs():
+    response = client.post("/extract?source=fr&target=en",
+                           files={"file": ("fake.pdf", b"not a pdf", "application/pdf")})
+    assert response.status_code == 400
