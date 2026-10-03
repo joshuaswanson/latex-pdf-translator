@@ -23,6 +23,41 @@ def test_html_placeholders_round_trip(attribute):
     assert from_html(to_html(TEMPLATE, attribute)) == TEMPLATE
 
 
+def google_engine_responding_with(response):
+    engine = create_engine("google", "fr", "en")
+    calls = []
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs))
+        return response
+
+    engine._client = SimpleNamespace(post=post)
+    return engine, calls
+
+
+def test_google_request_joins_segments_and_restores_placeholders():
+    segments = [["Theorem. ", "Théorème. "], ["Let XXXM0XXX be a function.", "Soit XXXM0XXX."]]
+    engine, calls = google_engine_responding_with(FakeResponse(200, [segments, None, "fr"]))
+
+    assert engine.translate_batch(["Théorème. Soit{M0} une fonction."]) == [
+        "Theorem. Let {M0} be a function."]
+    url, request = calls[0]
+    assert url == GoogleFreeEngine.URL
+    assert request["params"] == {"client": "gtx", "sl": "fr", "tl": "en", "dt": "t"}
+    assert request["data"] == {"q": "Théorème. Soit XXXM0XXX une fonction."}
+
+
+def test_google_rate_limit():
+    engine, _ = google_engine_responding_with(FakeResponse(429))
+    with pytest.raises(RateLimitedError):
+        engine.translate_batch(["Bonjour"])
+
+
+def test_google_rejects_unknown_languages():
+    with pytest.raises(EngineError, match="does not support"):
+        create_engine("google", "xx", "en")
+
+
 def test_google_markers_round_trip():
     marked = GoogleFreeEngine._to_markers("Soit{M0}une fonction")
     assert marked == "Soit XXXM0XXX une fonction"

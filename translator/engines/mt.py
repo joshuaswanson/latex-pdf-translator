@@ -3,34 +3,50 @@
 import html
 import re
 
-from deep_translator import GoogleTranslator
-from deep_translator.exceptions import LanguageNotSupportedException, TooManyRequests
+import httpx
+from deep_translator.constants import GOOGLE_LANGUAGES_TO_CODES
 
-from translator.engines.base import Engine, EngineError, RateLimitedError, post_json
+from translator.engines.base import (
+    Engine, EngineError, RateLimitedError, post_json, retry_after_seconds,
+)
 
 GOOGLE_MARKER_RE = re.compile(r"XXXM(\d+)XXX", re.IGNORECASE)
 
 
 class GoogleFreeEngine(Engine):
-    """The free Google Translate web endpoint. It treats XXXM0XXX as an opaque token."""
+    """The keyless Google Translate endpoint. It treats XXXM0XXX as an opaque token."""
 
     name = "google"
     label = "Google Translate"
     apply_term_fixes = True
 
+    URL = "https://translate.googleapis.com/translate_a/single"
+
     def __init__(self, source, target, **kwargs):
         super().__init__(source, target, **kwargs)
-        try:
-            self._translator = GoogleTranslator(source=source, target=target)
-        except LanguageNotSupportedException as e:
-            raise EngineError(f"Google Translate does not support this language: {e}")
+        codes = set(GOOGLE_LANGUAGES_TO_CODES.values())
+        for code in (source, target):
+            if code.lower() not in codes:
+                raise EngineError(f"Google Translate does not support the language {code!r}.")
+        # Google answers requests from the `requests` library with HTTP 429
+        # where it serves httpx
+        self._client = httpx.Client(timeout=60)
 
     def translate_batch(self, texts, context=("", "")):
-        try:
-            return [self._from_markers(self._translator.translate(self._to_markers(t)))
-                    for t in texts]
-        except TooManyRequests:
-            raise RateLimitedError()
+        return [self._translate(text) for text in texts]
+
+    def _translate(self, text: str) -> str:
+        response = self._client.post(
+            self.URL,
+            params={"client": "gtx", "sl": self.source, "tl": self.target, "dt": "t"},
+            data={"q": self._to_markers(text)},
+            timeout=60,
+        )
+        if response.status_code == 429:
+            raise RateLimitedError(retry_after_seconds(response.headers))
+        response.raise_for_status()
+        segments = response.json()[0] or []
+        return self._from_markers("".join(segment[0] for segment in segments if segment[0]))
 
     @staticmethod
     def _to_markers(text: str) -> str:
@@ -40,8 +56,8 @@ class GoogleFreeEngine(Engine):
         return re.sub("(XXXM\\d+XXX)([a-zA-ZÀ-ÿ])", r"\1 \2", text)
 
     @staticmethod
-    def _from_markers(text: str | None) -> str | None:
-        return None if text is None else GOOGLE_MARKER_RE.sub(r"{M\1}", text)
+    def _from_markers(text: str) -> str:
+        return GOOGLE_MARKER_RE.sub(r"{M\1}", text)
 
 
 class DeepLEngine(Engine):
