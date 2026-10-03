@@ -197,12 +197,15 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
         # (Link colors are fixed in a post-processing pass after save/reload)
 
         # Phase 2: Re-render translated text + math glyphs
-        page_text = PageText(page.rect)
         for line, translated in page_lines[page_idx]:
             whiteout = _get_whiteout_rect(page, line)
             line_rules = [rule for rule in rules if rule.intersects(whiteout)]
+            # Writing each line's text right away keeps the stored text in
+            # reading order for copy and search
+            page_text = PageText(page.rect)
             text_end_x = _render_line_content(page, orig_page, line, translated, page_text,
                                               line_rules)
+            page_text.write(page)
             # Record rendered text extent for link rectangle adjustment
             y_mid = (line.bbox[1] + line.bbox[3]) / 2
             orig_x0, orig_x1 = line.bbox[0], line.bbox[2]
@@ -210,7 +213,6 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
                 (orig_x0, orig_x1, orig_x0, text_end_x))
             changed += 1
 
-        page_text.write(page)
         for box in collateral:
             page.show_pdf_page(box, glyph_doc, page_idx, clip=box)
 
