@@ -4,6 +4,7 @@ import re
 import threading
 import time
 from collections import Counter
+from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -291,29 +292,62 @@ def _translate_with_retry(engine: Engine, texts: list[str],
         time.sleep(wait)
 
 
+@dataclass
+class Segments:
+    """The units sent for translation: single lines or merged paragraphs."""
+    groups: list[list[int]]  # indices into the lines of each segment
+    texts: list[str]
+    math: list[list[list[Span]]]
+
+
+def segment_lines(lines: list[TranslatableLine]) -> Segments:
+    """Group consecutive body-text lines into paragraphs for better translation."""
+    groups = _group_paragraphs(lines)
+    texts = []
+    math = []
+    for group in groups:
+        if len(group) == 1:
+            line = lines[group[0]]
+            texts.append(line.toc_content if line.is_toc else line.template)
+            math.append(line.math_spans)
+        else:
+            merged, merged_math = _merge_paragraph_templates(lines, group)
+            texts.append(merged)
+            math.append(merged_math)
+    return Segments(groups, texts, math)
+
+
+def apply_translations(lines: list[TranslatableLine], segments: Segments,
+                       translated: list[str | None], apply_term_fixes: bool) -> list[str]:
+    """Per-line translations from segment translations. None keeps a segment's original text."""
+    translations = [""] * len(lines)
+    for i, group in enumerate(segments.groups):
+        text = translated[i] if translated[i] is not None else segments.texts[i]
+        processed = _postprocess_translation(text, apply_term_fixes)
+        if len(group) == 1:
+            translations[group[0]] = processed
+        else:
+            per_line = _split_translation(processed, lines, group, segments.math[i])
+            for idx, line_text in zip(group, per_line):
+                translations[idx] = line_text
+    return translations
+
+
+def uses_term_fixes(engine_applies_fixes: bool, target: str) -> bool:
+    return engine_applies_fixes and target.lower() in ENGLISH_CODES
+
+
 def translate_lines(lines: list[TranslatableLine], engine: Engine,
                     cache_path: Path | None = None,
                     progress_callback=None) -> list[str]:
     """Translate all lines with the given engine.
 
-    Groups consecutive body-text lines into paragraphs for better translation
-    quality, then splits results back to per-line for rendering.
-    Uses a disk cache to avoid re-translating on subsequent runs.
+    Translates paragraph segments, then splits results back to per-line for
+    rendering. Uses a disk cache to avoid re-translating on subsequent runs.
     """
-    groups = _group_paragraphs(lines)
+    segments = segment_lines(lines)
+    groups, group_texts = segments.groups, segments.texts
     cache = _load_cache(cache_path) if cache_path else {}
-
-    group_texts = []
-    group_math = []
-    for group in groups:
-        if len(group) == 1:
-            line = lines[group[0]]
-            group_texts.append(line.toc_content if line.is_toc else line.template)
-            group_math.append(line.math_spans)
-        else:
-            merged, merged_ms = _merge_paragraph_templates(lines, group)
-            group_texts.append(merged)
-            group_math.append(merged_ms)
 
     keys = [_cache_key(engine, text) for text in group_texts]
     translated = [cache.get(key) for key in keys]
@@ -350,12 +384,10 @@ def translate_lines(lines: list[TranslatableLine], engine: Engine,
                 for future in as_completed(futures):
                     batch = futures[future]
                     for i, result in zip(batch, future.result()):
-                        if result is None:
-                            # Fall back to the untranslated text without caching
-                            # it, so the next run retries this group.
-                            translated[i] = group_texts[i]
-                        else:
-                            translated[i] = result
+                        # An untranslated group stays out of the cache, so the
+                        # next run retries it
+                        translated[i] = result
+                        if result is not None:
                             cache[keys[i]] = result
                     completed += len(batch)
                     if progress_callback:
@@ -368,19 +400,5 @@ def translate_lines(lines: list[TranslatableLine], engine: Engine,
         if cache_path:
             _save_cache(cache_path, cache)
 
-    apply_term_fixes = engine.apply_term_fixes and engine.target.lower() in ENGLISH_CODES
-
-    # Split paragraph translations back to per-line
-    translations = [""] * len(lines)
-    for group_idx, (translated_text, group) in enumerate(zip(translated, groups)):
-        processed = _postprocess_translation(translated_text, apply_term_fixes)
-
-        if len(group) == 1:
-            translations[group[0]] = processed
-        else:
-            per_line = _split_translation(processed, lines, group,
-                                          group_math[group_idx])
-            for idx, text in zip(group, per_line):
-                translations[idx] = text
-
-    return translations
+    return apply_translations(lines, segments, translated,
+                              uses_term_fixes(engine.apply_term_fixes, engine.target))
