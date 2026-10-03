@@ -2,7 +2,8 @@ import pytest
 
 from conftest import FONT_VARIANTS, open_fixture
 from translator.extract import (
-    Span, TranslatableLine, _compose_accents, _is_english_block, _merge_split_lines,
+    Span, TranslatableLine, _compose_accents, _is_english_block, _merge_same_y_lines,
+    _merge_split_lines,
     _resolve_wordless_spans, extract_lines,
 )
 
@@ -106,3 +107,18 @@ def test_lines_on_different_visual_lines_are_not_merged():
 
     assert [m.template for m in merged] == ["tous nuls. Par construction et la suite",
                                             "Si x, définissons"]
+
+
+def test_overlapping_text_lines_merge_only_on_a_shared_baseline():
+    def raw_line(text, bbox, baseline):
+        span = {"text": text, "font": "SFRM1000", "size": 10, "bbox": bbox,
+                "ink_bbox": bbox, "origin": (bbox[0], baseline)}
+        return {"spans": [span], "bbox": bbox}
+
+    same_line = [raw_line("posons", (113, 298, 216, 312), 310),
+                 raw_line(". Les", (205, 300, 482, 314), 310)]
+    radical_and_next_line = [raw_line("müssen, wo", (72, 356, 540, 368), 366),
+                             raw_line("arbeiten", (465, 342, 540, 363), 354)]
+
+    assert len(_merge_same_y_lines(same_line, roman_is_text=False)) == 1
+    assert len(_merge_same_y_lines(radical_and_next_line, roman_is_text=False)) == 2

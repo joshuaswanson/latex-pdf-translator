@@ -297,19 +297,33 @@ def _merge_same_y_lines(lines, roman_is_text: bool, max_x_gap=8):
         else:
             y_groups.append([cmex_line])
 
+    def text_baseline(line) -> float | None:
+        baselines = [s["origin"][1] for s in line["spans"]
+                     if is_text_span(s["font"], s["text"], roman_is_text)]
+        return min(baselines) if baselines else None
+
+    def has_text(line):
+        return text_baseline(line) is not None
+
     result = []
     for y_group in y_groups:
         if len(y_group) == 1:
             result.append(y_group[0])
             continue
 
-        # Within each y-group, cluster by x-proximity
+        # Within each y-group, cluster by x-proximity. Pieces of one visual
+        # line may overlap horizontally through a formula, but overlapping
+        # text lines with different baselines are separate visual lines whose
+        # boxes touch through a tall glyph.
         y_group.sort(key=lambda l: l["bbox"][0])
         x_clusters = [[y_group[0]]]
         for line in y_group[1:]:
-            prev_x1 = x_clusters[-1][-1]["bbox"][2]
-            curr_x0 = line["bbox"][0]
-            if curr_x0 - prev_x1 < max_x_gap:
+            previous = x_clusters[-1][-1]
+            gap = line["bbox"][0] - previous["bbox"][2]
+            baselines = (text_baseline(previous), text_baseline(line))
+            separate_lines = (gap < -max_x_gap and None not in baselines
+                              and abs(baselines[0] - baselines[1]) > 2)
+            if gap < max_x_gap and not separate_lines:
                 x_clusters[-1].append(line)
             else:
                 x_clusters.append([line])
@@ -318,10 +332,6 @@ def _merge_same_y_lines(lines, roman_is_text: bool, max_x_gap=8):
             if len(cluster) == 1:
                 result.append(cluster[0])
                 continue
-
-            def has_text(line):
-                return any(is_text_span(s["font"], s["text"], roman_is_text)
-                           for s in line["spans"])
 
             # Don't merge if multiple text lines start at left margin
             # (these are consecutive visual lines, not fragments)
