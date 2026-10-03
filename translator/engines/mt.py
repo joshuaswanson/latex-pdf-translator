@@ -25,7 +25,7 @@ class GoogleFreeEngine(Engine):
         except LanguageNotSupportedException as e:
             raise EngineError(f"Google Translate does not support this language: {e}")
 
-    def translate_batch(self, texts):
+    def translate_batch(self, texts, context=("", "")):
         try:
             return [self._from_markers(self._translator.translate(self._to_markers(t)))
                     for t in texts]
@@ -48,6 +48,7 @@ class DeepLEngine(Engine):
     name = "deepl"
     label = "DeepL"
     requires_key = True
+    max_concurrency = 4
     max_batch_items = 50
     max_batch_chars = 30000
     apply_term_fixes = True
@@ -55,7 +56,7 @@ class DeepLEngine(Engine):
     # DeepL requires a regional variant for these target languages
     TARGET_VARIANTS = {"en": "EN-US", "pt": "PT-PT", "zh": "ZH-HANS"}
 
-    def translate_batch(self, texts):
+    def translate_batch(self, texts, context=("", "")):
         # Free API keys end in ":fx" and use a separate host
         host = "api-free.deepl.com" if self.api_key.endswith(":fx") else "api.deepl.com"
         body = {
@@ -76,11 +77,12 @@ class AzureEngine(Engine):
     name = "azure"
     label = "Azure Translator"
     requires_key = True
+    max_concurrency = 4
     max_batch_items = 100
     max_batch_chars = 20000
     apply_term_fixes = True
 
-    def translate_batch(self, texts):
+    def translate_batch(self, texts, context=("", "")):
         headers = {"Ocp-Apim-Subscription-Key": self.api_key}
         if self.region:
             headers["Ocp-Apim-Subscription-Region"] = self.region
@@ -95,11 +97,12 @@ class GoogleCloudEngine(Engine):
     name = "google-cloud"
     label = "Google Cloud Translation"
     requires_key = True
+    max_concurrency = 4
     max_batch_items = 100
     max_batch_chars = 25000
     apply_term_fixes = True
 
-    def translate_batch(self, texts):
+    def translate_batch(self, texts, context=("", "")):
         body = {
             "q": [to_html(t, 'translate="no"') for t in texts],
             "source": self.source,

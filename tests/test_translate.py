@@ -48,7 +48,7 @@ def test_terminology_fixes_apply_only_to_english():
     class Literal(FakeEngine):
         apply_term_fixes = True
 
-        def translate_batch(self, texts):
+        def translate_batch(self, texts, context=("", "")):
             return ["Demonstration of the proposition" for _ in texts]
 
     assert translate_lines(lines, Literal(target="en")) == ["Proof of the proposition"]
@@ -89,7 +89,7 @@ def test_requests_are_batched_within_engine_limits():
 
 def test_failed_translations_are_not_cached(monkeypatch, tmp_path):
     class FailingEngine(FakeEngine):
-        def translate_batch(self, texts):
+        def translate_batch(self, texts, context=("", "")):
             raise ConnectionError("offline")
 
     monkeypatch.setattr(translate.time, "sleep", lambda seconds: None)
@@ -106,10 +106,10 @@ def test_rate_limiting_stops_the_run_and_keeps_finished_translations(monkeypatch
     class RateLimitedEngine(FakeEngine):
         max_batch_items = 1
 
-        def translate_batch(self, texts):
+        def translate_batch(self, texts, context=("", "")):
             if self.batches:
                 raise RateLimitedError()
-            return super().translate_batch(texts)
+            return super().translate_batch(texts, context)
 
     sleeps = []
     monkeypatch.setattr(translate.time, "sleep", sleeps.append)
@@ -129,3 +129,35 @@ def test_body_text_in_12pt_documents_merges_into_paragraphs():
         line.spans[0].size = 12
 
     assert _group_paragraphs(lines) == [[0, 1, 2]]
+
+
+def test_batches_run_in_parallel_up_to_the_engine_limit():
+    import threading
+    import time as clock
+
+    class ParallelEngine(FakeEngine):
+        max_batch_items = 1
+        max_concurrency = 4
+
+        def __init__(self):
+            super().__init__()
+            self.active = 0
+            self.peak = 0
+            self.lock = threading.Lock()
+
+        def translate_batch(self, texts, context=("", "")):
+            with self.lock:
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+            clock.sleep(0.05)
+            with self.lock:
+                self.active -= 1
+            return [text.upper() for text in texts]
+
+    lines = [make_line(f"ligne {i}", y=100 + 30 * i) for i in range(12)]
+    engine = ParallelEngine()
+
+    result = translate_lines(lines, engine)
+
+    assert result == [f"LIGNE {i}" for i in range(12)]
+    assert engine.peak == 4

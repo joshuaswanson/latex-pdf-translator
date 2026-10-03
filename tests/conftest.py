@@ -36,7 +36,7 @@ class FakeEngine(Engine):
         super().__init__(source, target)
         self.batches: list[list[str]] = []
 
-    def translate_batch(self, texts):
+    def translate_batch(self, texts, context=("", "")):
         self.batches.append(texts)
         return [re.sub(r"[^\W\d_][\w-]*",
                        lambda m: FRENCH_TO_ENGLISH.get(m.group(0), m.group(0)), text)

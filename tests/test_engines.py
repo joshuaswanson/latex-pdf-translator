@@ -1,10 +1,11 @@
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from translator.engines import ENGINES, EngineError, RateLimitedError, create_engine
 from translator.engines import base
-from translator.engines.llm import ClaudeEngine, LLMEngine
+from translator.engines.llm import ClaudeEngine, LLMEngine, request_json
 from translator.engines.mt import (
     DeepLEngine, GoogleFreeEngine, from_html, from_xml, to_html, to_xml,
 )
@@ -115,8 +116,8 @@ class ScriptedLLM(LLMEngine):
         self.requests = []
         self.notes = []
 
-    def complete(self, texts, note=""):
-        self.requests.append(texts)
+    def complete(self, request, count, note=""):
+        self.requests.append(json.loads(request))
         self.notes.append(note)
         return self.responses.pop(0)
 
@@ -130,7 +131,8 @@ def test_llm_retries_items_with_broken_placeholders_individually():
     result = engine.translate_batch(["Soit {M0}", "alors {M1} vaut", "et {M1} {M2}"])
 
     assert result == ["Let {M0} be", "then {M1} holds", "and {M1} {M2}"]
-    assert engine.requests[1] == ["alors {M1} vaut"]
+    assert engine.requests[1] == {"items": ["alors {M1} vaut"],
+                                  "before": "Soit {M0}", "after": "et {M1} {M2}"}
 
 
 def test_llm_retry_names_the_required_placeholders():
@@ -179,7 +181,16 @@ def test_claude_reads_structured_output(stop_reason, text, expected):
 
     engine._client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create)))
 
-    assert engine.complete(["Soit {M0}"]) == expected
+    assert engine.complete(request_json(["Soit {M0}"], ("", "")), 1) == expected
     assert sent["model"] == "claude-opus-5-5"
     assert sent["fallbacks"] == "default"
     assert sent["output_config"]["format"]["type"] == "json_schema"
+
+
+def test_llm_request_carries_neighboring_text_as_context():
+    engine = ScriptedLLM([["Let {M0}"]])
+
+    engine.translate_batch(["Soit {M0}"], ("Théorème 2.", "une fonction continue."))
+
+    assert engine.requests == [{"items": ["Soit {M0}"], "before": "Théorème 2.",
+                                "after": "une fonction continue."}]

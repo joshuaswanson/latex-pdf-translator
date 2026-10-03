@@ -1,8 +1,10 @@
 import hashlib
 import json
 import re
+import threading
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from translator.charmap import TERM_FIXES
@@ -262,7 +264,8 @@ def _batches(indices: list[int], texts: list[str], engine: Engine):
         yield batch
 
 
-def _translate_with_retry(engine: Engine, texts: list[str]) -> list[str | None]:
+def _translate_with_retry(engine: Engine, texts: list[str],
+                          context: tuple[str, str]) -> list[str | None]:
     """Translate one batch, with None for texts that could not be translated.
 
     Raises EngineError when the engine keeps rate limiting, so a blocked
@@ -270,7 +273,7 @@ def _translate_with_retry(engine: Engine, texts: list[str]) -> list[str | None]:
     """
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            return engine.translate_batch(texts)
+            return engine.translate_batch(texts, context)
         except EngineError:
             raise
         except RateLimitedError as e:
@@ -324,21 +327,43 @@ def translate_lines(lines: list[TranslatableLine], engine: Engine,
     if progress_callback and pending:
         progress_callback(0, len(pending))
 
+    # Set when the engine fails for good, so queued batches stop being sent
+    stopped = threading.Event()
+
+    def translate_batch(batch: list[int]) -> list[str | None]:
+        if stopped.is_set():
+            return [None] * len(batch)
+        context = (group_texts[batch[0] - 1] if batch[0] > 0 else "",
+                   group_texts[batch[-1] + 1] if batch[-1] + 1 < len(group_texts) else "")
+        try:
+            return _translate_with_retry(engine, [group_texts[i] for i in batch], context)
+        except EngineError:
+            stopped.set()
+            raise
+
     completed = 0
     try:
-        for batch in _batches(pending, group_texts, engine):
-            results = _translate_with_retry(engine, [group_texts[i] for i in batch])
-            for i, result in zip(batch, results):
-                if result is None:
-                    # Fall back to the untranslated text without caching it, so
-                    # the next run retries this group.
-                    translated[i] = group_texts[i]
-                else:
-                    translated[i] = result
-                    cache[keys[i]] = result
-            completed += len(batch)
-            if progress_callback:
-                progress_callback(completed, len(pending))
+        with ThreadPoolExecutor(max_workers=engine.max_concurrency) as pool:
+            futures = {pool.submit(translate_batch, batch): batch
+                       for batch in _batches(pending, group_texts, engine)}
+            try:
+                for future in as_completed(futures):
+                    batch = futures[future]
+                    for i, result in zip(batch, future.result()):
+                        if result is None:
+                            # Fall back to the untranslated text without caching
+                            # it, so the next run retries this group.
+                            translated[i] = group_texts[i]
+                        else:
+                            translated[i] = result
+                            cache[keys[i]] = result
+                    completed += len(batch)
+                    if progress_callback:
+                        progress_callback(completed, len(pending))
+            except BaseException:
+                for future in futures:
+                    future.cancel()
+                raise
     finally:
         if cache_path:
             _save_cache(cache_path, cache)

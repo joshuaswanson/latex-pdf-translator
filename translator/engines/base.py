@@ -22,7 +22,8 @@ class Engine:
     """Translates batches of templates whose {M0}, {M1}, ... placeholders stand for math.
 
     translate_batch returns one result per input, or None for an input that
-    could not be translated.
+    could not be translated. `context` holds the text just before and after the
+    batch, which engines may use to understand it but must not translate.
     """
 
     name = ""
@@ -30,6 +31,9 @@ class Engine:
     requires_key = False
     max_batch_items = 1
     max_batch_chars = 4500
+    # Requests in flight at once. The free Google endpoint and local models
+    # gain nothing from parallel requests.
+    max_concurrency = 1
     # Google Translate style engines make known mistakes in English math prose
     apply_term_fixes = False
 
@@ -49,7 +53,8 @@ class Engine:
     def cache_id(self) -> str:
         return self.name
 
-    def translate_batch(self, texts: list[str]) -> list[str | None]:
+    def translate_batch(self, texts: list[str],
+                        context: tuple[str, str] = ("", "")) -> list[str | None]:
         raise NotImplementedError
 
 

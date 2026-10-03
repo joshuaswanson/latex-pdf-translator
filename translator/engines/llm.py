@@ -42,7 +42,9 @@ class LLMEngine(Engine):
         source, target = language_name(self.source), language_name(self.target)
         return (
             f"You translate excerpts of a {source} mathematics paper into {target}. "
-            "The input is a JSON list of text items taken from consecutive lines of the PDF. "
+            "The input is a JSON object whose \"items\" are text taken from consecutive lines "
+            "of the PDF. \"before\" and \"after\", when present, hold the neighboring text "
+            "for context only and must not be translated. "
             "Items may start or end mid-sentence. Translate each item separately, never move "
             "words between items, and return exactly one translation per item, in the same order. "
             "Tokens of the form {M0}, {M1}, ... stand for mathematical formulas: copy every "
@@ -52,21 +54,24 @@ class LLMEngine(Engine):
             f"Use standard {target} mathematical terminology. {note}"
         ).rstrip()
 
-    def translate_batch(self, texts):
-        results = self._complete_checked(texts)
+    def translate_batch(self, texts, context=("", "")):
+        results = self._complete_checked(texts, context)
         out = []
-        for text, result in zip(texts, results):
+        for i, (text, result) in enumerate(zip(texts, results)):
             if result is None:
                 tokens = ", ".join(placeholders(text))
                 note = (f"The translation must contain each of these tokens exactly once: {tokens}."
                         if tokens else "")
-                result = self._complete_checked([text], note)[0]
+                neighbors = (texts[i - 1] if i > 0 else context[0],
+                             texts[i + 1] if i + 1 < len(texts) else context[1])
+                result = self._complete_checked([text], neighbors, note)[0]
             out.append(result)
         return out
 
-    def _complete_checked(self, texts: list[str], note: str = "") -> list[str | None]:
+    def _complete_checked(self, texts: list[str], context: tuple[str, str],
+                          note: str = "") -> list[str | None]:
         """Translations with missing or altered placeholders replaced by None."""
-        translations = self.complete(texts, note)
+        translations = self.complete(request_json(texts, context), len(texts), note)
         if translations is None or len(translations) != len(texts):
             return [None] * len(texts)
         return [
@@ -74,8 +79,8 @@ class LLMEngine(Engine):
             for text, t in zip(texts, translations)
         ]
 
-    def complete(self, texts: list[str], note: str = "") -> Sequence[str | None] | None:
-        """One model request, with `note` appended to the instructions.
+    def complete(self, request: str, count: int, note: str = "") -> Sequence[str | None] | None:
+        """One model request for `count` items, with `note` appended to the instructions.
 
         Returns None when the response is unusable.
         """
@@ -86,6 +91,7 @@ class ClaudeEngine(LLMEngine):
     name = "claude"
     label = "Claude"
     default_model = "claude-opus-5-5"
+    max_concurrency = 4
     max_batch_chars = 8000
 
     # Models that accept server-side refusal fallbacks
@@ -104,7 +110,7 @@ class ClaudeEngine(LLMEngine):
         except anthropic.AnthropicError:
             raise EngineError("No Anthropic credentials found. Set ANTHROPIC_API_KEY.")
 
-    def complete(self, texts, note=""):
+    def complete(self, request, count, note=""):
         anthropic = self._anthropic
         output_config: dict = {"format": {"type": "json_schema", "schema": TRANSLATIONS_SCHEMA}}
         if "haiku" not in self.model:
@@ -113,7 +119,7 @@ class ClaudeEngine(LLMEngine):
             model=self.model,
             max_tokens=16000,
             system=self.instructions(note),
-            messages=[{"role": "user", "content": json.dumps(texts, ensure_ascii=False)}],
+            messages=[{"role": "user", "content": request}],
             output_config=output_config,
         )
         try:
@@ -142,12 +148,13 @@ class GeminiEngine(LLMEngine):
     label = "Gemini"
     requires_key = True
     default_model = "gemini-3.5-flash-lite"
+    max_concurrency = 4
 
-    def complete(self, texts, note=""):
+    def complete(self, request, count, note=""):
         body = {
             "systemInstruction": {"parts": [{"text": self.instructions(note)}]},
             "contents": [{"role": "user",
-                          "parts": [{"text": json.dumps(texts, ensure_ascii=False)}]}],
+                          "parts": [{"text": request}]}],
             "generationConfig": {
                 "temperature": 0,
                 "responseMimeType": "application/json",
@@ -169,7 +176,7 @@ class OllamaEngine(LLMEngine):
     default_model = "qwen2.5:14b"
     max_batch_chars = 4000
 
-    def complete(self, texts, note=""):
+    def complete(self, request, count, note=""):
         host = (self.host or "http://localhost:11434").rstrip("/")
         body = {
             "model": self.model,
@@ -179,7 +186,7 @@ class OllamaEngine(LLMEngine):
             "options": {"temperature": 0, "num_ctx": 8192},
             "messages": [
                 {"role": "system", "content": self.instructions(note)},
-                {"role": "user", "content": json.dumps(texts, ensure_ascii=False)},
+                {"role": "user", "content": request},
             ],
         }
         try:
@@ -229,16 +236,15 @@ class AppleEngine(LLMEngine):
             self._schemas[count] = Translations
         return self._schemas[count]
 
-    def complete(self, texts, note=""):
-        return asyncio.run(self._respond(texts, note))
+    def complete(self, request, count, note=""):
+        return asyncio.run(self._respond(request, count, note))
 
-    async def _respond(self, texts: list[str], note: str) -> list[str] | None:
+    async def _respond(self, request: str, count: int, note: str) -> list[str] | None:
         fm = self._fm
         session = fm.LanguageModelSession(instructions=self.instructions(note),
                                           model=self._system_model)
         try:
-            result = await session.respond(json.dumps(texts, ensure_ascii=False),
-                                           generating=self._schema(len(texts)))
+            result = await session.respond(request, generating=self._schema(count))
         except fm.RateLimitedError:
             raise RateLimitedError()
         except fm.UnsupportedLanguageOrLocaleError:
@@ -247,6 +253,16 @@ class AppleEngine(LLMEngine):
                 fm.DecodingFailureError):
             return None
         return list(result.translations)
+
+
+def request_json(texts: list[str], context: tuple[str, str]) -> str:
+    before, after = context
+    request: dict = {"items": texts}
+    if before:
+        request["before"] = before
+    if after:
+        request["after"] = after
+    return json.dumps(request, ensure_ascii=False)
 
 
 def _parse_translations(text: str | None) -> list[str] | None:
