@@ -107,6 +107,32 @@ def _resolve_wordless_spans(spans: list["Span"]):
         span.is_text = neighbor is not None and neighbor.is_text
 
 
+def _merge_text_runs(spans: list["Span"]) -> list["Span"]:
+    """Merge consecutive text spans in the same font and baseline into one span.
+
+    PDFs often store every word and space as its own span. Math spans stay
+    separate because each one is positioned on its own when rendered.
+    """
+    merged = []
+    for span in spans:
+        previous = merged[-1] if merged else None
+        if (previous is not None and previous.is_text and span.is_text
+                and previous.font == span.font and abs(previous.size - span.size) < 0.01
+                and abs(previous.origin[1] - span.origin[1]) < 0.5):
+            merged[-1] = Span(
+                text=previous.text + span.text,
+                font=previous.font,
+                size=previous.size,
+                bbox=_union(previous.bbox, span.bbox),
+                ink_bbox=_union(previous.ink_bbox, span.ink_bbox),
+                origin=previous.origin,
+                is_text=True,
+            )
+        else:
+            merged.append(span)
+    return merged
+
+
 def _compose_accents(text: str) -> str:
     def acute_etc(m):
         base = DOTLESS_TO_DOTTED.get(m.group(2), m.group(2))
@@ -146,7 +172,7 @@ def _get_font_style(fontname: str) -> str:
 
 # -- Data structures --------------------------------------------------------
 
-@dataclass
+@dataclass(slots=True)
 class Span:
     text: str
     font: str
@@ -157,7 +183,7 @@ class Span:
     is_text: bool
 
 
-@dataclass
+@dataclass(slots=True)
 class TranslatableLine:
     page_idx: int
     spans: list[Span]
@@ -390,6 +416,7 @@ def extract_lines(doc) -> list[TranslatableLine]:
                     continue
                 if roman_is_text:
                     _resolve_wordless_spans(spans)
+                spans = _merge_text_runs(spans)
 
                 # Build template with math placeholders.
                 # Merge consecutive math spans into single placeholders so
