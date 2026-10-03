@@ -318,12 +318,18 @@ def segment_lines(lines: list[TranslatableLine]) -> Segments:
 
 
 def apply_translations(lines: list[TranslatableLine], segments: Segments,
-                       translated: list[str | None], apply_term_fixes: bool) -> list[str]:
-    """Per-line translations from segment translations. None keeps a segment's original text."""
+                       translated: list[str | None],
+                       apply_term_fixes: bool | list[bool]) -> list[str]:
+    """Per-line translations from segment translations. None keeps a segment's original text.
+
+    `apply_term_fixes` is one flag for all segments or one flag per segment.
+    """
+    if isinstance(apply_term_fixes, bool):
+        apply_term_fixes = [apply_term_fixes] * len(segments.texts)
     translations = [""] * len(lines)
     for i, group in enumerate(segments.groups):
         text = translated[i] if translated[i] is not None else segments.texts[i]
-        processed = _postprocess_translation(text, apply_term_fixes)
+        processed = _postprocess_translation(text, apply_term_fixes[i])
         if len(group) == 1:
             translations[group[0]] = processed
         else:
@@ -339,25 +345,51 @@ def uses_term_fixes(engine_applies_fixes: bool, target: str) -> bool:
 
 def translate_lines(lines: list[TranslatableLine], engine: Engine,
                     cache_path: Path | None = None,
-                    progress_callback=None) -> list[str]:
+                    progress_callback=None,
+                    fallback: Engine | None = None) -> list[str]:
     """Translate all lines with the given engine.
 
     Translates paragraph segments, then splits results back to per-line for
-    rendering. Uses a disk cache to avoid re-translating on subsequent runs.
+    rendering. Segments the engine fails on go to `fallback`, if given. Uses a
+    disk cache to avoid re-translating on subsequent runs.
     """
     segments = segment_lines(lines)
-    groups, group_texts = segments.groups, segments.texts
+    texts = segments.texts
     cache = _load_cache(cache_path) if cache_path else {}
+    term_fixes = [uses_term_fixes(engine.apply_term_fixes, engine.target)] * len(texts)
+    try:
+        translated = _run_engine(engine, texts, list(range(len(texts))), cache, progress_callback)
+        failed = [i for i, t in enumerate(translated) if t is None]
+        if fallback and failed:
+            print(f"  {len(failed)} untranslated, trying {fallback.label}")
+            retried = _run_engine(fallback, texts, failed, cache, None)
+            for i in failed:
+                if retried[i] is not None:
+                    translated[i] = retried[i]
+                    term_fixes[i] = uses_term_fixes(fallback.apply_term_fixes, fallback.target)
+    finally:
+        if cache_path:
+            _save_cache(cache_path, cache)
+    return apply_translations(lines, segments, translated, term_fixes)
 
-    keys = [_cache_key(engine, text) for text in group_texts]
-    translated = [cache.get(key) for key in keys]
-    pending = [i for i, t in enumerate(translated) if t is None]
+
+def _run_engine(engine: Engine, texts: list[str], indices: list[int], cache: dict,
+                progress_callback) -> list[str | None]:
+    """Translate texts[i] for each index, returning None where the engine failed.
+
+    Successful translations are added to the cache. Entries for indices not
+    requested are None.
+    """
+    keys = {i: _cache_key(engine, texts[i]) for i in indices}
+    translated: list[str | None] = [None] * len(texts)
+    for i in indices:
+        translated[i] = cache.get(keys[i])
+    pending = [i for i in indices if translated[i] is None]
 
     if pending:
-        print(f"  {len(groups) - len(pending)} cached, {len(pending)} to translate")
+        print(f"  {len(indices) - len(pending)} cached, {len(pending)} to translate")
     else:
-        print(f"  All {len(groups)} translations cached")
-
+        print(f"  All {len(indices)} translations cached")
     if progress_callback and pending:
         progress_callback(0, len(pending))
 
@@ -367,38 +399,32 @@ def translate_lines(lines: list[TranslatableLine], engine: Engine,
     def translate_batch(batch: list[int]) -> list[str | None]:
         if stopped.is_set():
             return [None] * len(batch)
-        context = (group_texts[batch[0] - 1] if batch[0] > 0 else "",
-                   group_texts[batch[-1] + 1] if batch[-1] + 1 < len(group_texts) else "")
+        context = (texts[batch[0] - 1] if batch[0] > 0 else "",
+                   texts[batch[-1] + 1] if batch[-1] + 1 < len(texts) else "")
         try:
-            return _translate_with_retry(engine, [group_texts[i] for i in batch], context)
+            return _translate_with_retry(engine, [texts[i] for i in batch], context)
         except EngineError:
             stopped.set()
             raise
 
     completed = 0
-    try:
-        with ThreadPoolExecutor(max_workers=engine.max_concurrency) as pool:
-            futures = {pool.submit(translate_batch, batch): batch
-                       for batch in _batches(pending, group_texts, engine)}
-            try:
-                for future in as_completed(futures):
-                    batch = futures[future]
-                    for i, result in zip(batch, future.result()):
-                        # An untranslated group stays out of the cache, so the
-                        # next run retries it
-                        translated[i] = result
-                        if result is not None:
-                            cache[keys[i]] = result
-                    completed += len(batch)
-                    if progress_callback:
-                        progress_callback(completed, len(pending))
-            except BaseException:
-                for future in futures:
-                    future.cancel()
-                raise
-    finally:
-        if cache_path:
-            _save_cache(cache_path, cache)
-
-    return apply_translations(lines, segments, translated,
-                              uses_term_fixes(engine.apply_term_fixes, engine.target))
+    with ThreadPoolExecutor(max_workers=engine.max_concurrency) as pool:
+        futures = {pool.submit(translate_batch, batch): batch
+                   for batch in _batches(pending, texts, engine)}
+        try:
+            for future in as_completed(futures):
+                batch = futures[future]
+                for i, result in zip(batch, future.result()):
+                    # An untranslated segment stays out of the cache, so the
+                    # next run retries it
+                    translated[i] = result
+                    if result is not None:
+                        cache[keys[i]] = result
+                completed += len(batch)
+                if progress_callback:
+                    progress_callback(completed, len(pending))
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
+    return translated

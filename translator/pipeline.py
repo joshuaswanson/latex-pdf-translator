@@ -19,8 +19,11 @@ class NoTranslatableTextError(ValueError):
 
 def translate_pdf(pdf_bytes: bytes, engine: Engine,
                   cache_path: Path | None = None,
-                  on_progress: ProgressCallback | None = None) -> bytes:
+                  on_progress: ProgressCallback | None = None,
+                  fallback: Engine | None = None) -> bytes:
     """Translate a LaTeX-typeset PDF, returning the translated PDF bytes.
+
+    Text the engine fails to translate goes to `fallback`, if given.
 
     Raises EngineError when the translation engine fails in a way the user
     has to fix, such as a rejected API key.
@@ -32,6 +35,7 @@ def translate_pdf(pdf_bytes: bytes, engine: Engine,
     translations = translate_lines(
         lines, engine, cache_path=cache_path,
         progress_callback=lambda completed, total: report("translate", completed, total),
+        fallback=fallback,
     )
     return render_pdf(pdf_bytes, lines, translations, report)
 

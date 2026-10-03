@@ -50,11 +50,16 @@ def main():
     parser.add_argument("--engine", "-e", default="google", choices=list(ENGINES),
                         help="Translation engine (default: google)")
     parser.add_argument("--model", "-m", help="Model for the claude, gemini and ollama engines")
+    parser.add_argument("--fallback", "-f", choices=list(ENGINES),
+                        help="Engine for text the main engine fails to translate (default: none)")
     args = parser.parse_args()
 
     try:
         engine = create_engine(args.engine, args.source, args.target, model=args.model,
                                ambient_credentials=True, **engine_options(args.engine))
+        fallback = args.fallback and create_engine(
+            args.fallback, args.source, args.target, ambient_credentials=True,
+            **engine_options(args.fallback))
     except EngineError as e:
         raise SystemExit(str(e))
 
@@ -63,6 +68,8 @@ def main():
     print(f"Input:  {input_path}")
     print(f"Output: {output_path}")
     print(f"Engine: {engine.label}" + (f" ({engine.model})" if engine.model else ""))
+    if fallback:
+        print(f"Fallback: {fallback.label}")
 
     current_stage = None
 
@@ -79,7 +86,7 @@ def main():
     try:
         result = translate_pdf(input_path.read_bytes(), engine,
                                cache_path=input_path.with_suffix(".cache.json"),
-                               on_progress=print_progress)
+                               on_progress=print_progress, fallback=fallback or None)
     except (NoTranslatableTextError, EngineError) as e:
         raise SystemExit(f"\n{e}")
 

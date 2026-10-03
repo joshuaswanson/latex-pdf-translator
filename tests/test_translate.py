@@ -161,3 +161,28 @@ def test_batches_run_in_parallel_up_to_the_engine_limit():
 
     assert result == [f"LIGNE {i}" for i in range(12)]
     assert engine.peak == 4
+
+
+def test_fallback_engine_translates_what_the_main_engine_failed_on():
+    class FailsOnFormulas(FakeEngine):
+        name = "primary"
+
+        def translate_batch(self, texts, context=("", "")):
+            return [None if "{M" in text else "LLM: " + text for text in texts]
+
+    class Fallback(FakeEngine):
+        name = "fallback"
+        apply_term_fixes = True
+
+        def translate_batch(self, texts, context=("", "")):
+            self.batches.append(texts)
+            return ["Demonstration of " + text for text in texts]
+
+    lines = [make_line("ligne une", y=100), make_line("avec {M0}", y=130)]
+    lines[1].math_spans = [[]]
+    fallback = Fallback()
+
+    result = translate_lines(lines, FailsOnFormulas(), fallback=fallback)
+
+    assert result == ["LLM: ligne une", "Proof of avec {M0}"]
+    assert fallback.batches == [["avec {M0}"]]

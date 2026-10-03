@@ -57,7 +57,7 @@ uv sync --extra apple && uv run main.py paper.pdf --source fr --engine apple
 
 The website offers the engines that run on the server and asks for the key in the browser. Google blocks the free endpoint for the server's cloud IP addresses, so with the free Google option the visitor's browser translates the extracted text and sends it back for rendering. Ollama and the Apple model run only in the command-line tool.
 
-The keyed engines send up to four requests at once. LLM engines also receive the text around each batch as context. If an engine keeps rate limiting requests, the run stops with a message and keeps the translations finished so far in the cache.
+`--fallback ENGINE` sends text the main engine fails to translate to a second engine, for example `--engine ollama --fallback google`. It is off by default, so a local engine never sends text anywhere unless asked to. The keyed engines send up to four requests at once. LLM engines also receive the text around each batch as context. If an engine keeps rate limiting requests, the run stops with a message and keeps the translations finished so far in the cache.
 
 Run the tests with `uv run pytest`. They use small LaTeX fixtures in `tests/fixtures` and a fake engine, so they need no network access.
 
