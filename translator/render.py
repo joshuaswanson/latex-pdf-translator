@@ -72,6 +72,11 @@ TIGHT_GLYPH_PADDING = (0.3, 0.3, 0.3)
 OPENING_DELIMITERS = set("([{\u27e8") | {"\x00", "\x02", "\x04", "\x06", "\x08", "\x0a",
                                           "\x10", "\x11"}
 
+# Fraction bars and radical overlines are thin filled rectangles, or in older
+# dvips output thin inline images
+RULE_MAX_THICKNESS = 1.5
+RULE_MIN_WIDTH = 2
+
 # Translated text that would overflow its block is condensed horizontally,
 # down to this fraction of its natural width.
 MIN_TEXT_SCALE = 0.7
@@ -169,12 +174,15 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
 
         # Phase 1: Add redaction annotations for all lines on this page
         rects = [_get_whiteout_rect(page, line) for line, _ in page_lines[page_idx]]
+        rules = _thin_rules(orig_doc[page_idx])
         collateral = _collateral_glyph_boxes(orig_doc[page_idx], rects, lines_on_page)
         for rect in rects:
             page.add_redact_annot(rect, fill=(1, 1, 1))
 
         # Apply all redactions at once (actually removes underlying content)
-        page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE)
+        # Pixel mode removes rules drawn as images inside the rects and leaves
+        # other images alone
+        page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS)
 
         # Restore links removed by redaction and ensure all have colored borders
         surviving = {
@@ -191,7 +199,10 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
         # Phase 2: Re-render translated text + math glyphs
         page_text = PageText(page.rect)
         for line, translated in page_lines[page_idx]:
-            text_end_x = _render_line_content(page, orig_page, line, translated, page_text)
+            whiteout = _get_whiteout_rect(page, line)
+            line_rules = [rule for rule in rules if rule.intersects(whiteout)]
+            text_end_x = _render_line_content(page, orig_page, line, translated, page_text,
+                                              line_rules)
             # Record rendered text extent for link rectangle adjustment
             y_mid = (line.bbox[1] + line.bbox[3]) / 2
             orig_x0, orig_x1 = line.bbox[0], line.bbox[2]
@@ -208,6 +219,14 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
 
     print(f"  {changed} lines modified")
     return all_annot_colors, rendered_extents, all_link_texts
+
+
+def _thin_rules(page) -> list[pymupdf.Rect]:
+    """Horizontal rules on the page, from both vector drawings and images."""
+    candidates = [pymupdf.Rect(info["bbox"]) for info in page.get_image_info()]
+    candidates += [drawing["rect"] for drawing in page.get_drawings()]
+    return [rect for rect in candidates
+            if rect.height < RULE_MAX_THICKNESS and rect.width > RULE_MIN_WIDTH]
 
 
 def _remove_translatable_text(page, lines_on_page: list[TranslatableLine]):
@@ -425,7 +444,8 @@ def _fix_style_boundaries(segments):
 
 
 def _render_line_content(page, orig_page, line: TranslatableLine,
-                         translated: str, page_text: PageText) -> float:
+                         translated: str, page_text: PageText,
+                         rules: list[pymupdf.Rect]) -> float:
     """Render translated text + math glyphs onto the page.
     Returns x position after rendering content (before TOC dots)."""
     x0, y0, x1, y1 = line.bbox
@@ -465,7 +485,7 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
             idx = int(m.group(1))
             if idx >= len(line.math_spans):
                 continue
-            x += _render_math_group(page, orig_page, line.math_spans[idx], x, page_text)
+            x += _render_math_group(page, orig_page, line.math_spans[idx], x, page_text, rules)
         else:
             if not text:
                 continue
@@ -515,7 +535,8 @@ def _toc_text_limit(line: TranslatableLine, fontsize: float, font_obj) -> float:
 
 
 def _render_math_group(page, orig_page, group: list[Span], x: float,
-                       page_text: PageText | None) -> float:
+                       page_text: PageText | None,
+                       rules: list[pymupdf.Rect] | None = None) -> float:
     """Render one math placeholder's spans starting at x, returning width consumed.
 
     With page=None nothing is drawn and only the width is computed.
@@ -526,6 +547,7 @@ def _render_math_group(page, orig_page, group: list[Span], x: float,
 
     # Render: stacked spans at same x, sequential spans advance x
     start_x = x
+    placed = {}  # span index -> (rendered x0, rendered x1)
     frac_x_start = None
     frac_max_width = 0
     for gi, ms in enumerate(group):
@@ -539,6 +561,7 @@ def _render_math_group(page, orig_page, group: list[Span], x: float,
             if frac_x_start is None:
                 frac_x_start = x
             rendered = _render_math_span(page, orig_page, ms, frac_x_start, extra_spans, page_text)
+            placed[gi] = (frac_x_start, frac_x_start + rendered)
             frac_max_width = max(frac_max_width, rendered)
         else:
             # Flush any pending fraction width
@@ -548,13 +571,48 @@ def _render_math_group(page, orig_page, group: list[Span], x: float,
                 x = frac_x_start + frac_max_width + 1.5
                 frac_x_start = None
                 frac_max_width = 0
-            x += _render_math_span(page, orig_page, ms, x, extra_spans, page_text)
+            rendered = _render_math_span(page, orig_page, ms, x, extra_spans, page_text)
+            placed[gi] = (x, x + rendered)
+            x += rendered
     # Flush final fraction (if stacked spans are at end of group)
     if frac_x_start is not None:
         _draw_fraction_bars(page, group, stacked, frac_x_start,
                             frac_x_start + frac_max_width)
         x = frac_x_start + frac_max_width + 1.5
+    if page is not None and rules:
+        _redraw_group_rules(page, group, stacked, placed, rules)
     return x - start_x
+
+
+def _redraw_group_rules(page, group: list[Span], stacked: set[int],
+                        placed: dict[int, tuple[float, float]], rules: list[pymupdf.Rect]):
+    """Redraw the rules over a math group at the new positions of the spans beneath them.
+
+    Redaction removes rules such as radical overlines along with the line.
+    Fraction bars are skipped because _draw_fraction_bars draws them. Rules
+    that belong to this group are removed from `rules`.
+    """
+    spans = [group[i] for i in placed]
+    if not spans:
+        return
+    gy0, gy1 = min(s.bbox[1] for s in spans), max(s.bbox[3] for s in spans)
+    fraction = sorted((group[i] for i in stacked), key=lambda s: s.bbox[1])
+    for rule in list(rules):
+        beneath = sorted(
+            (i for i in placed
+             if min(group[i].bbox[2], rule.x1) - max(group[i].bbox[0], rule.x0) > 0.5),
+            key=lambda i: group[i].bbox[0],
+        )
+        if not beneath or not gy0 - 2 <= rule.y0 <= gy1 + 2:
+            continue
+        rules.remove(rule)
+        if len(fraction) >= 2 and fraction[0].bbox[3] - 1 <= rule.y0 <= fraction[-1].bbox[1] + 1:
+            continue
+        first, last = group[beneath[0]], group[beneath[-1]]
+        x0 = placed[beneath[0]][0] + (rule.x0 - first.bbox[0])
+        x1 = placed[beneath[-1]][1] + (rule.x1 - last.bbox[2])
+        page.draw_rect(pymupdf.Rect(x0, rule.y0, max(x1, x0 + 1), max(rule.y1, rule.y0 + 0.4)),
+                       color=None, fill=(0, 0, 0), width=0)
 
 
 def _find_stacked_spans(group: list[Span]) -> set[int]:
