@@ -41,7 +41,7 @@ Choose an engine with `--engine` (default `google`). Engines that need credentia
 
 | Engine | Needs | Notes |
 |---|---|---|
-| `google` | nothing | Free Google Translate web endpoint. Google blocks it for some networks with a CAPTCHA. |
+| `google` | nothing | Free Google Translate endpoint. Google blocks it for some networks, including cloud servers. |
 | `deepl` | `DEEPL_API_KEY` | DeepL API Free gives 500,000 characters a month. |
 | `azure` | `AZURE_TRANSLATOR_KEY`, `AZURE_TRANSLATOR_REGION` | The free F0 tier gives 2 million characters a month. |
 | `google-cloud` | `GOOGLE_CLOUD_API_KEY` | Official Google Cloud Translation API. |
@@ -55,7 +55,7 @@ uv run main.py paper.pdf --source de --engine ollama --model qwen2.5:32b
 uv sync --extra apple && uv run main.py paper.pdf --source fr --engine apple
 ```
 
-The website offers the engines that run on the server and asks for the key in the browser. Ollama and the Apple model run only in the command-line tool.
+The website offers the engines that run on the server and asks for the key in the browser. Google blocks the free endpoint for the server's cloud IP addresses, so with the free Google option the visitor's browser translates the extracted text and sends it back for rendering. Ollama and the Apple model run only in the command-line tool.
 
 The keyed engines send up to four requests at once. LLM engines also receive the text around each batch as context. If an engine keeps rate limiting requests, the run stops with a message and keeps the translations finished so far in the cache.
 
