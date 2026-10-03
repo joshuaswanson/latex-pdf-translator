@@ -42,6 +42,12 @@ DOTLESS_TO_DOTTED = {"\u0131": "i", "\u0237": "j"}
 
 EXTENSION_FONT_RE = re.compile(r"CMEX|LMMathExtension")
 
+# Fragments of one visual line that PyMuPDF puts in different blocks are at
+# most this far apart horizontally
+MAX_FRAGMENT_GAP = 8
+
+PLACEHOLDER_RE = re.compile(r"\{M(\d+)\}")
+
 HYPHENATED_END_RE = re.compile(r"[^\W\d_]-$")
 CONTINUATION_RE = re.compile(r"([^\W\d_]+)\s*")
 
@@ -324,6 +330,8 @@ def extract_lines(doc) -> list[TranslatableLine]:
     roman_is_text = not _uses_cm_super(doc)
 
     for page_idx in range(len(doc)):
+        page_start = len(result)
+        orphans = []  # [(bbox, [Span, ...]), ...] math-only lines no block line claimed
         page = doc[page_idx]
         raw = page.get_text("rawdict")
         _add_span_text(raw)
@@ -424,6 +432,9 @@ def extract_lines(doc) -> list[TranslatableLine]:
                     continue
                 # Skip pure numbers, punctuation, dots
                 if re.match(r'^[\s\d.,;:!?()\[\]/*+=\-]+$', text_only):
+                    for span in spans:
+                        span.is_text = False
+                    orphans.append((line_data["bbox"], spans))
                     continue
 
                 # Detect TOC lines (dot leaders)
@@ -479,9 +490,116 @@ def extract_lines(doc) -> list[TranslatableLine]:
                 if best_line:
                     # Prepend to the first math group
                     best_line.math_spans[0] = mo_spans + best_line.math_spans[0]
+                else:
+                    orphans.append((mo_bbox, mo_spans))
+
+        page_lines = result[page_start:]
+        _attach_orphans(page_lines, orphans)
+        result[page_start:] = _merge_split_lines(page_lines)
 
     _join_hyphenated_words(result)
     return result
+
+
+def _same_visual_line(a: tuple, b: tuple) -> bool:
+    overlap = min(a[3], b[3]) - max(a[1], b[1])
+    min_height = min(a[3] - a[1], b[3] - b[1])
+    return min_height > 0 and overlap / min_height >= 0.5
+
+
+def _adjacent(left: tuple, right: tuple) -> bool:
+    """True if `right` starts where `left` ends, overlapping by at most MAX_FRAGMENT_GAP."""
+    return left[0] < right[0] and abs(right[0] - left[2]) < MAX_FRAGMENT_GAP
+
+
+def _union(a: tuple, b: tuple) -> tuple:
+    return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+
+
+def _attach_orphans(lines: list[TranslatableLine], orphans: list[tuple]):
+    """Attach math-only fragments to the line they continue.
+
+    PyMuPDF sometimes puts the end of a formula (a fraction denominator, a
+    closing parenthesis) in a separate block. Unattached, the fragment would
+    stay at its old position while the translated line around it moves.
+    """
+    for bbox, spans in sorted(orphans, key=lambda orphan: orphan[0][0]):
+        for line in lines:
+            if not line.is_toc and _same_visual_line(line.bbox, bbox) and _attach_math(line, bbox, spans):
+                break
+
+
+def _attach_math(line: TranslatableLine, bbox: tuple, spans: list[Span]) -> bool:
+    """Add spans to the line's math next to them. Returns False if they are not adjacent."""
+    for group in line.math_spans:
+        gx0 = min(s.bbox[0] for s in group)
+        gx1 = max(s.bbox[2] for s in group)
+        if bbox[0] <= gx1 + MAX_FRAGMENT_GAP and bbox[2] >= gx0 - MAX_FRAGMENT_GAP:
+            group.extend(spans)
+            group.sort(key=lambda s: s.bbox[0])
+            break
+    else:
+        if _adjacent(line.bbox, bbox):
+            line.template += f"{{M{len(line.math_spans)}}}"
+            line.math_spans.append(list(spans))
+        elif _adjacent(bbox, line.bbox):
+            line.template = "{M0}" + _shift_placeholders(line.template, 1)
+            line.math_spans.insert(0, list(spans))
+        else:
+            return False
+    line.spans.extend(spans)
+    line.bbox = _union(line.bbox, bbox)
+    return True
+
+
+def _shift_placeholders(template: str, offset: int) -> str:
+    return PLACEHOLDER_RE.sub(lambda m: f"{{M{int(m.group(1)) + offset}}}", template)
+
+
+def _merge_split_lines(lines: list[TranslatableLine]) -> list[TranslatableLine]:
+    """Merge lines that continue each other on the same visual line across blocks."""
+    lines = list(lines)
+    merged_any = True
+    while merged_any:
+        merged_any = False
+        for left in lines:
+            right = next((
+                other for other in lines
+                if other is not left and not left.is_toc and not other.is_toc
+                and _adjacent(left.bbox, other.bbox)
+                and _same_visual_line(left.bbox, other.bbox)
+            ), None)
+            if right is not None:
+                _append_line(left, right)
+                lines.remove(right)
+                merged_any = True
+                break
+    return lines
+
+
+def _append_line(left: TranslatableLine, right: TranslatableLine):
+    right_template = right.template
+    right_groups = right.math_spans
+    if re.search(r"\{M\d+\}$", left.template) and right_template.startswith("{M0}"):
+        # A formula split between the two lines becomes one math group
+        left.math_spans[-1].extend(right_groups[0])
+        right_template = _shift_placeholders(right_template[len("{M0}"):], len(left.math_spans) - 1)
+        right_groups = right_groups[1:]
+    else:
+        right_template = _shift_placeholders(right_template, len(left.math_spans))
+        if re.search(r"[\w}]$", left.template) and re.match(r"\w", right_template):
+            right_template = " " + right_template
+    left.template += right_template
+    left.math_spans.extend(right_groups)
+    left.spans.extend(right.spans)
+    left.bbox = _union(left.bbox, right.bbox)
+    left.max_x1 = max(left.max_x1, right.max_x1)
+    for count, style in right.text_styles:
+        if left.text_styles and left.text_styles[-1][1] == style:
+            left.text_styles[-1] = (left.text_styles[-1][0] + count, style)
+        else:
+            left.text_styles.append((count, style))
+    left.font_style = _dominant_font_style(left.spans)
 
 
 def _join_hyphenated_words(lines: list[TranslatableLine]):

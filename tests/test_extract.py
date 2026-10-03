@@ -2,7 +2,8 @@ import pytest
 
 from conftest import FONT_VARIANTS, open_fixture
 from translator.extract import (
-    Span, _compose_accents, _is_english_block, _resolve_wordless_spans, extract_lines,
+    Span, TranslatableLine, _compose_accents, _is_english_block, _merge_split_lines,
+    _resolve_wordless_spans, extract_lines,
 )
 
 
@@ -76,3 +77,32 @@ def test_words_hyphenated_across_lines_are_joined(variant):
 
     assert templates[-2].endswith("le résultat principal")
     assert templates[-1] == "de cette section."
+
+
+@pytest.mark.parametrize("variant", FONT_VARIANTS)
+def test_line_split_by_a_fraction_is_merged(variant):
+    lines = extract_lines(open_fixture(variant))
+    line = next(line for line in lines if line.template.startswith("La dérivée"))
+
+    assert line.template == "La dérivée vérifie{M0}, et nous avons donc démontré le résultat principal"
+    assert [s.text for s in line.math_spans[0] if s.text.strip()][:2] == ["df", "dx"]
+
+
+def test_lines_on_different_visual_lines_are_not_merged():
+    def line(template, bbox):
+        span = Span(text=template, font="SFRM1000", size=10, bbox=bbox, ink_bbox=bbox,
+                    origin=(bbox[0], bbox[3] - 2), is_text=True)
+        return TranslatableLine(
+            page_idx=0, spans=[span], bbox=bbox, max_x1=480, template=template,
+            math_spans=[], is_toc=False, toc_content="", toc_page_num="",
+            font_style="regular", text_styles=[(len(template), "regular")],
+        )
+
+    tall_line = line("tous nuls. Par construction", (113, 344, 446, 363))
+    next_paragraph = line("Si x, définissons", (125, 355, 480, 370))
+    continuation = line("et la suite", (448, 346, 480, 360))
+
+    merged = _merge_split_lines([tall_line, next_paragraph, continuation])
+
+    assert [m.template for m in merged] == ["tous nuls. Par construction et la suite",
+                                            "Si x, définissons"]
