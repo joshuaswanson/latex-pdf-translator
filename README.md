@@ -65,6 +65,5 @@ Run the tests with `uv run pytest`. They use small LaTeX fixtures in `tests/fixt
 
 - Lines that contain math are translated one line at a time, so sentences that span several lines lose context
 - Big delimiters and operators (CMEX), script and Fraktur letters, small caps, and glyphs in unknown fonts are copied from the original page
-- Overlines of square roots in some PDFs are lost when their line is re-rendered
 - Translated lines wider than their text column are condensed horizontally to at most 70% of their natural width; beyond that they overflow
 - Terminology fixes for common machine translation mistakes in math prose apply only to English output from the google, deepl, azure and google-cloud engines
