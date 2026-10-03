@@ -127,6 +127,10 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
             if link_text:
                 all_link_texts[key] = link_text
 
+    # Copied glyphs come from pages of this copy with the translatable text removed
+    glyph_doc = pymupdf.open()
+    glyph_doc.insert_pdf(orig_doc)
+
     changed = 0
     pages_to_render = sorted(page_lines)
     total_pages = len(pages_to_render)
@@ -134,16 +138,17 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
         progress_callback(0, total_pages)
     for page_num, page_idx in enumerate(pages_to_render):
         page = work_doc[page_idx]
-        glyph_source = _glyph_source(orig_doc, page_idx,
-                                     [line for line in lines if line.page_idx == page_idx])
-        orig_page = glyph_source[0]
+        lines_on_page = [line for line in lines if line.page_idx == page_idx]
+        orig_page = glyph_doc[page_idx]
+        _remove_translatable_text(orig_page, lines_on_page)
 
         # Save link annotations before redaction removes them
         saved_links = list(page.get_links())
 
         # Phase 1: Add redaction annotations for all lines on this page
-        for line, _translated in page_lines[page_idx]:
-            rect = _get_whiteout_rect(page, line)
+        rects = [_get_whiteout_rect(page, line) for line, _ in page_lines[page_idx]]
+        collateral = _collateral_glyph_boxes(orig_doc[page_idx], rects, lines_on_page)
+        for rect in rects:
             page.add_redact_annot(rect, fill=(1, 1, 1))
 
         # Apply all redactions at once (actually removes underlying content)
@@ -182,6 +187,9 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
                 (orig_x0, orig_x1, orig_x0, text_end_x))
             changed += 1
 
+        for box in collateral:
+            page.show_pdf_page(box, glyph_doc, page_idx, clip=box)
+
         if progress_callback:
             progress_callback(page_num + 1, total_pages)
 
@@ -189,16 +197,13 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
     return all_annot_colors, rendered_extents, all_link_texts
 
 
-def _glyph_source(orig_doc, page_idx: int, lines_on_page: list[TranslatableLine]):
-    """A copy of the original page without its translatable text.
+def _remove_translatable_text(page, lines_on_page: list[TranslatableLine]):
+    """Remove the translatable text from a copy of the original page.
 
     Copied math glyphs come from this page, so a tall glyph's clip carries no
     pieces of neighboring words. Each text span is removed through a thin band
     across its middle, which spares math glyphs that only reach toward it.
     """
-    doc = pymupdf.open()
-    doc.insert_pdf(orig_doc, from_page=page_idx, to_page=page_idx)
-    page = doc[0]
     for line in lines_on_page:
         for span in line.spans:
             if span.is_text and span.text.strip():
@@ -208,7 +213,36 @@ def _glyph_source(orig_doc, page_idx: int, lines_on_page: list[TranslatableLine]
                     fill=False)
     page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE,
                           graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
-    return doc
+
+
+def _collateral_glyph_boxes(orig_page, rects: list[pymupdf.Rect],
+                            lines_on_page: list[TranslatableLine]) -> list[pymupdf.Rect]:
+    """Areas of glyphs outside every translatable line that the redactions will remove.
+
+    These belong to content the tool does not re-render, such as display
+    equations, and are copied back from the glyph source after redaction.
+    """
+    rect_boxes = [tuple(rect) for rect in rects]
+    line_boxes = [span.bbox for line in lines_on_page for span in line.spans]
+    boxes = []
+    for block in orig_page.get_text("rawdict")["blocks"]:
+        for raw_line in block.get("lines", []):
+            for span in raw_line["spans"]:
+                touched = [r for r in rect_boxes if _overlaps(span["bbox"], r)]
+                if not touched:
+                    continue
+                hit = [
+                    char["bbox"] for char in span["chars"]
+                    if char["c"].strip()
+                    and any(_overlaps(char["bbox"], r) for r in touched)
+                    and not any(_contains(box, _center(char["bbox"])) for box in line_boxes)
+                ]
+                if hit:
+                    boxes.append(pymupdf.Rect(
+                        min(b[0] for b in hit) - 0.3, min(b[1] for b in hit) - 0.3,
+                        max(b[2] for b in hit) + 0.3, max(b[3] for b in hit) + 0.3,
+                    ))
+    return boxes
 
 
 def _lines_hit_by_redaction(page, changed: list[tuple], unchanged: list[tuple]) -> list[tuple]:
@@ -224,7 +258,7 @@ def _lines_hit_by_redaction(page, changed: list[tuple], unchanged: list[tuple]) 
     while True:
         newly_hit = [
             (line, text) for line, text in remaining
-            if any(_touches(span.bbox, rect) for span in line.spans for rect in rects)
+            if any(_overlaps(span.bbox, tuple(rect)) for span in line.spans for rect in rects)
         ]
         if not newly_hit:
             return hit
@@ -234,9 +268,17 @@ def _lines_hit_by_redaction(page, changed: list[tuple], unchanged: list[tuple]) 
         remaining = [(line, text) for line, text in remaining if id(line) not in hit_ids]
 
 
-def _touches(bbox: tuple, rect: pymupdf.Rect) -> bool:
-    overlap = pymupdf.Rect(bbox) & rect
-    return overlap.width > 0.1 and overlap.height > 0.1
+def _center(bbox: tuple) -> tuple[float, float]:
+    return (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
+
+
+def _contains(bbox: tuple, point: tuple[float, float]) -> bool:
+    return bbox[0] <= point[0] <= bbox[2] and bbox[1] <= point[1] <= bbox[3]
+
+
+def _overlaps(a: tuple, b: tuple) -> bool:
+    return (min(a[2], b[2]) - max(a[0], b[0]) > 0.1
+            and min(a[3], b[3]) - max(a[1], b[1]) > 0.1)
 
 
 def _get_whiteout_rect(page, line: TranslatableLine) -> pymupdf.Rect:
