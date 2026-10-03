@@ -263,11 +263,12 @@ def _collateral_glyph_boxes(orig_page, rects: list[pymupdf.Rect],
                 touched = [r for r in rect_boxes if _overlaps(span["bbox"], r)]
                 if not touched:
                     continue
+                nearby = [box for box in line_boxes if _overlaps(box, span["bbox"])]
                 hit = [
                     char["bbox"] for char in span["chars"]
                     if char["c"].strip()
                     and any(_overlaps(char["bbox"], r) for r in touched)
-                    and not any(_contains(box, _center(char["bbox"])) for box in line_boxes)
+                    and not any(_contains(box, _center(char["bbox"])) for box in nearby)
                 ]
                 if hit:
                     boxes.append(pymupdf.Rect(
