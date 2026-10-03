@@ -3,8 +3,8 @@ import pytest
 
 from conftest import FONT_VARIANTS, FakeEngine, fixture_pdf_bytes
 from translator.pipeline import NoTranslatableTextError, translate_pdf
-from translator.extract import Span
-from translator.render import _find_extent, _find_stacked_spans
+from translator.extract import Span, TranslatableLine
+from translator.render import _find_extent, _find_stacked_spans, _lines_hit_by_redaction
 
 
 @pytest.mark.parametrize("variant", FONT_VARIANTS)
@@ -61,3 +61,28 @@ def test_fraction_after_an_opening_delimiter_is_stacked():
     ]
 
     assert _find_stacked_spans(group) == {1, 2}
+
+
+def test_unchanged_line_touched_by_a_neighbor_redaction_is_redrawn():
+    def line(top, bottom, glyph_top=None):
+        spans = [Span(text="mot", font="SFRM1000", size=10, bbox=(100, top, 400, bottom),
+                      ink_bbox=(100, top, 400, bottom), origin=(100, bottom - 2), is_text=True)]
+        if glyph_top is not None:
+            radical = (200, glyph_top, 210, bottom)
+            spans.append(Span(text="√", font="CMSY10", size=10, bbox=radical, ink_bbox=radical,
+                              origin=(200, glyph_top + 8), is_text=False))
+        return TranslatableLine(
+            page_idx=0, spans=spans, bbox=(100, top, 400, bottom), max_x1=400, template="mot",
+            math_spans=[], is_toc=False, toc_content="", toc_page_num="",
+            font_style="regular", text_styles=[(3, "regular")],
+        )
+
+    translated = line(100, 112)
+    with_radical = line(114, 126, glyph_top=104)
+    far_below = line(140, 152)
+
+    with pymupdf.open() as doc:
+        hit = _lines_hit_by_redaction(doc.new_page(), [(translated, "word")],
+                                      [(with_radical, "mot"), (far_below, "mot")])
+
+    assert [line for line, _ in hit] == [with_radical]

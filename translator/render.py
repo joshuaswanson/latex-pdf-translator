@@ -88,13 +88,18 @@ MIN_TEXT_SCALE = 0.7
 def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
                translations: list[str], progress_callback=None):
     """Apply all translations to the work document."""
-    # Group lines by page, filtering unchanged ones
+    # Group lines by page, separating unchanged ones
     page_lines = {}
+    unchanged_lines = {}
     for line, translated in zip(lines, translations):
         original = line.toc_content if line.is_toc else line.template
         if translated.strip() == original.strip():
-            continue
-        page_lines.setdefault(line.page_idx, []).append((line, translated))
+            unchanged_lines.setdefault(line.page_idx, []).append((line, original))
+        else:
+            page_lines.setdefault(line.page_idx, []).append((line, translated))
+    for page_idx, changed_lines in page_lines.items():
+        changed_lines.extend(_lines_hit_by_redaction(
+            work_doc[page_idx], changed_lines, unchanged_lines.get(page_idx, [])))
 
     # Track rendered text extents for link rectangle adjustment
     # (page_idx, round(y_mid)) -> [(orig_x0, orig_x1, new_x0, text_end_x), ...]
@@ -129,7 +134,9 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
         progress_callback(0, total_pages)
     for page_num, page_idx in enumerate(pages_to_render):
         page = work_doc[page_idx]
-        orig_page = orig_doc[page_idx]
+        glyph_source = _glyph_source(orig_doc, page_idx,
+                                     [line for line in lines if line.page_idx == page_idx])
+        orig_page = glyph_source[0]
 
         # Save link annotations before redaction removes them
         saved_links = list(page.get_links())
@@ -180,6 +187,56 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
 
     print(f"  {changed} lines modified")
     return all_annot_colors, rendered_extents, all_link_texts
+
+
+def _glyph_source(orig_doc, page_idx: int, lines_on_page: list[TranslatableLine]):
+    """A copy of the original page without its translatable text.
+
+    Copied math glyphs come from this page, so a tall glyph's clip carries no
+    pieces of neighboring words. Each text span is removed through a thin band
+    across its middle, which spares math glyphs that only reach toward it.
+    """
+    doc = pymupdf.open()
+    doc.insert_pdf(orig_doc, from_page=page_idx, to_page=page_idx)
+    page = doc[0]
+    for line in lines_on_page:
+        for span in line.spans:
+            if span.is_text and span.text.strip():
+                middle = (span.bbox[1] + span.bbox[3]) / 2
+                page.add_redact_annot(
+                    pymupdf.Rect(span.bbox[0], middle - 0.25, span.bbox[2], middle + 0.25),
+                    fill=False)
+    page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE,
+                          graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
+    return doc
+
+
+def _lines_hit_by_redaction(page, changed: list[tuple], unchanged: list[tuple]) -> list[tuple]:
+    """Unchanged lines with glyphs that touch a changed line's redaction.
+
+    Redaction removes every character touching its rectangle, so a tall glyph
+    such as a radical reaching into the line above disappears with that line.
+    These lines are redrawn with their original text.
+    """
+    rects = [_get_whiteout_rect(page, line) for line, _ in changed]
+    hit = []
+    remaining = list(unchanged)
+    while True:
+        newly_hit = [
+            (line, text) for line, text in remaining
+            if any(_touches(span.bbox, rect) for span in line.spans for rect in rects)
+        ]
+        if not newly_hit:
+            return hit
+        hit.extend(newly_hit)
+        rects.extend(_get_whiteout_rect(page, line) for line, _ in newly_hit)
+        hit_ids = {id(line) for line, _ in newly_hit}
+        remaining = [(line, text) for line, text in remaining if id(line) not in hit_ids]
+
+
+def _touches(bbox: tuple, rect: pymupdf.Rect) -> bool:
+    overlap = pymupdf.Rect(bbox) & rect
+    return overlap.width > 0.1 and overlap.height > 0.1
 
 
 def _get_whiteout_rect(page, line: TranslatableLine) -> pymupdf.Rect:
@@ -585,10 +642,11 @@ def _render_math_span(page, orig_page, ms: Span, x: float,
     if kind in ("rsfs", "EUFM") and ms.text.strip():
         return _copy_original_glyph(page, orig_page, ms, x, extra_spans)
 
-    # CMEX glyphs hang below their baseline and come in many sizes, so a
-    # Unicode equivalent typeset on that baseline lands too high. Copying the
-    # original keeps the exact size and position.
-    if kind == "CMEX" and ms.text.strip():
+    # CMEX glyphs and radicals hang below their baseline and come in many
+    # sizes, so a Unicode equivalent typeset on that baseline lands too high.
+    # Copying the original keeps the exact size and position.
+    hangs_below_baseline = ms.origin[1] < (ms.bbox[1] + ms.bbox[3]) / 2
+    if (kind == "CMEX" or hangs_below_baseline) and ms.text.strip():
         return _copy_original_glyph(page, orig_page, ms, x)
 
     # CMSY combining characters (e.g. U+0338 "not" slash) need original glyph
