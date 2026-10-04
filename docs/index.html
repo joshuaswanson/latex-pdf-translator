@@ -84,6 +84,17 @@
         src: url("fonts/cmu-serif-title.woff2") format("woff2");
         font-display: swap;
       }
+      @font-face {
+        font-family: "CMU Serif Title";
+        src: url("fonts/cmu-serif-italic-title.woff2") format("woff2");
+        font-style: italic;
+        font-display: swap;
+      }
+
+      .title-accent {
+        font-style: italic;
+        color: var(--accent);
+      }
 
       header {
         padding: 5rem 0 2rem;
@@ -782,7 +793,7 @@
             ><span class="latex"
               >L<span class="latex-a">A</span>T<span class="latex-e">E</span>X</span
             >
-            PDF Translator</span
+            PDF <em class="title-accent">Translator</em></span
           >
         </h1>
         <p class="subtitle">
