@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LaTeX PDF Translator</title>
+    <meta
+      name="description"
+      content="Translate French and German math papers into English. Formulas, fonts and layout stay as they were typeset."
+    />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 36'%3E%3Cpath d='M4 2.5h17l7 7v24H4z' fill='%23FFFEFB' stroke='%231C1B1A' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M21 2.5v7h7z' fill='%23B4432C' stroke='%231C1B1A' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M20.5 15.5h-9l4.5 4-4.5 4h9' fill='none' stroke='%231C1B1A' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css"
@@ -15,10 +24,29 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600&family=JetBrains+Mono:wght@400;500&family=Source+Sans+3:wght@300;400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap"
       rel="stylesheet"
     />
     <style>
+      /* Computer Modern, the typeface of the papers this tool translates */
+      @font-face {
+        font-family: "CMU Serif";
+        src: url("fonts/cmu-serif-regular.woff2") format("woff2");
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "CMU Serif";
+        src: url("fonts/cmu-serif-italic.woff2") format("woff2");
+        font-style: italic;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "CMU Serif";
+        src: url("fonts/cmu-serif-bold.woff2") format("woff2");
+        font-weight: 700;
+        font-display: swap;
+      }
+
       *,
       *::before,
       *::after {
@@ -28,20 +56,21 @@
       }
 
       :root {
-        --cream: #f6f1eb;
-        --warm-white: #faf8f5;
-        --ink: #1a1614;
-        --ink-light: #3d3632;
-        --ink-faint: #8a7e76;
-        --accent: #b8432f;
-        --accent-soft: #d4694e;
-        --rule: #d4cdc5;
-        --rule-light: #e8e2db;
-        --green: #2e7d32;
-        --paper-shadow: rgba(26, 22, 20, 0.06);
-        --serif: "Cormorant Garamond", "Georgia", serif;
-        --sans: "Source Sans 3", "Helvetica Neue", sans-serif;
-        --mono: "JetBrains Mono", "Menlo", monospace;
+        --desk: #e3e3e0;
+        --desk-deep: #d6d6d2;
+        --paper: #fffefb;
+        --ink: #1c1b1a;
+        --ink-soft: #3e3b37;
+        --ink-faint: #6e6a64;
+        --rule: #d8d5cf;
+        --accent: #b4432c;
+        --accent-wash: #f7e7e1;
+        --green: #2f6b3a;
+        --serif: "CMU Serif", "Latin Modern Roman", Georgia, serif;
+        --sans: "Source Sans 3", "Helvetica Neue", Arial, sans-serif;
+        --mono: "JetBrains Mono", Menlo, monospace;
+        --sheet-shadow: 0 1px 2px rgba(28, 27, 26, 0.08),
+          0 12px 32px -8px rgba(28, 27, 26, 0.18);
       }
 
       html {
@@ -49,66 +78,98 @@
       }
 
       body {
-        font-family: var(--sans);
-        background: var(--cream);
+        font-family: var(--serif);
+        font-size: 1.125rem;
+        line-height: 1.6;
+        background: var(--desk);
         color: var(--ink);
-        font-size: 1.05rem;
-        line-height: 1.7;
-        overflow-x: hidden;
         -webkit-font-smoothing: antialiased;
       }
 
-      /* --- Grain overlay --- */
-      body::after {
-        content: "";
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-        opacity: 0.025;
-        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-        z-index: 9999;
+      a {
+        color: var(--accent);
+        text-underline-offset: 3px;
+        text-decoration-thickness: 1px;
       }
 
-      /* --- Layout --- */
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
       .container {
-        max-width: 860px;
+        max-width: 1120px;
         margin: 0 auto;
         padding: 0 2rem;
       }
 
-      /* --- Header --- */
-      /* The title is set in Computer Modern (CMU Serif), the typeface of the
-         documents this tool translates, subset to the title's letters. */
-      @font-face {
-        font-family: "CMU Serif Title";
-        src: url("fonts/cmu-serif-title.woff2") format("woff2");
-        font-display: swap;
-      }
-      @font-face {
-        font-family: "CMU Serif Title";
-        src: url("fonts/cmu-serif-italic-title.woff2") format("woff2");
-        font-style: italic;
-        font-display: swap;
+      /* --- Top bar --- */
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 1.5rem 0;
       }
 
-      .title-accent {
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        color: var(--ink);
+        text-decoration: none;
+        font-family: var(--sans);
+        font-weight: 600;
+        font-size: 1rem;
+      }
+
+      .mark {
+        width: 26px;
+        height: 30px;
+        flex: none;
+      }
+
+      .beta {
+        font-family: var(--serif);
         font-style: italic;
+        font-weight: 400;
+        color: var(--ink-faint);
+      }
+
+      .topbar nav {
+        display: flex;
+        gap: 1.75rem;
+        font-family: var(--sans);
+        font-size: 0.95rem;
+      }
+
+      .topbar nav a {
+        color: var(--ink-soft);
+        text-decoration: none;
+      }
+
+      .topbar nav a:hover {
         color: var(--accent);
       }
 
-      header {
-        padding: 5rem 0 2rem;
-        text-align: center;
-        position: relative;
+      /* --- Hero --- */
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
+        gap: 4rem;
+        align-items: start;
+        padding: 3rem 0 5rem;
       }
 
-      header h1 {
-        font-family: "CMU Serif Title", var(--serif);
+      .wordmark {
+        font-family: var(--serif);
         font-weight: 400;
-        font-size: clamp(2.1rem, 4.6vw, 3.3rem);
-        line-height: 1.15;
-        margin-bottom: 0.9rem;
-        color: var(--ink);
+        font-size: clamp(2.6rem, 5vw, 3.6rem);
+        line-height: 1.1;
+        letter-spacing: -0.005em;
+      }
+
+      .wordmark em {
+        color: var(--accent);
       }
 
       .latex {
@@ -130,133 +191,40 @@
         margin-right: -0.125em;
       }
 
-      .subtitle {
-        font-family: var(--sans);
+      .lead {
+        margin-top: 1.25rem;
+        max-width: 30rem;
         font-size: 1.3rem;
-        font-weight: 400;
-        font-style: normal;
-        color: var(--ink-light);
-        max-width: 540px;
-        margin: 0 auto;
         line-height: 1.5;
+        color: var(--ink-soft);
       }
 
-      .beta-note {
-        margin-top: 1rem;
-        font-size: 0.95rem;
-        color: var(--ink-faint);
-      }
-
-      .beta-note a {
-        color: var(--accent);
-        text-decoration: underline;
-        text-underline-offset: 2px;
-      }
-
-      /* --- Beta corner badge --- */
-      .beta-badge {
-        position: absolute;
-        top: 0;
-        right: 0;
-        z-index: 1000;
-        overflow: hidden;
-        width: 120px;
-        height: 120px;
-        pointer-events: none;
-      }
-
-      .beta-badge a {
-        pointer-events: auto;
+      /* --- Controls --- */
+      .controls {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
-        justify-content: center;
-        gap: 0.3rem;
-        position: absolute;
-        top: 22px;
-        right: -40px;
-        width: 180px;
-        padding: 0.35rem 0;
-        background: var(--accent);
-        color: white;
-        font-family: var(--mono);
-        font-size: 0.75rem;
-        font-weight: 500;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        text-decoration: none;
-        transform: rotate(45deg);
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-      }
-
-      .beta-badge svg {
-        width: 14px;
-        height: 14px;
-        fill: white;
-      }
-
-      /* --- Decorative math floats --- */
-      .math-float {
-        position: absolute;
-        color: var(--rule);
-        pointer-events: none;
-        user-select: none;
-        z-index: -1;
-        font-size: 1.1rem;
-      }
-
-      /* --- Sections --- */
-      section {
-        margin-bottom: 4rem;
-      }
-
-      .section-label {
-        font-family: var(--mono);
-        font-size: 0.8rem;
-        font-weight: 500;
-        text-transform: uppercase;
-        letter-spacing: 0.15em;
-        color: var(--accent);
-        margin-bottom: 0.75rem;
-      }
-
-      section h2 {
-        font-family: var(--serif);
-        font-size: 2.2rem;
-        font-weight: 600;
-        margin-bottom: 1rem;
-        letter-spacing: -0.01em;
-      }
-
-      section p {
-        color: var(--ink-light);
-        font-size: 1.05rem;
-        line-height: 1.75;
-      }
-
-      /* --- Language selectors --- */
-      .lang-row {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.75rem;
-        margin-bottom: 1.25rem;
-      }
-
-      .lang-row label {
+        gap: 0.75rem 1.5rem;
+        margin-top: 2.25rem;
         font-family: var(--sans);
         font-size: 0.95rem;
-        font-weight: 500;
         color: var(--ink-faint);
       }
 
-      .lang-row select {
+      .control {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      select {
         font-family: var(--sans);
         font-size: 0.95rem;
         padding: 0.45rem 2.25rem 0.45rem 0.75rem;
         border: 1px solid var(--rule);
         border-radius: 6px;
-        background-color: var(--warm-white);
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%238a7e76' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");
+        background-color: var(--paper);
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%236e6a64' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");
         background-repeat: no-repeat;
         background-position: right 0.8rem center;
         background-size: 0.7rem;
@@ -266,27 +234,16 @@
         -webkit-appearance: none;
       }
 
-      .lang-row select:hover {
-        border-color: var(--accent-soft);
+      select:hover {
+        border-color: var(--ink-faint);
       }
 
-      .lang-row select:focus-visible {
-        outline: 2px solid var(--accent-soft);
-        outline-offset: 1px;
-      }
-
-      .lang-arrow {
-        font-size: 1.2rem;
-        color: var(--ink-faint);
-      }
-
-      /* --- Engine credentials --- */
       .key-row {
         display: flex;
         flex-direction: column;
-        align-items: center;
         gap: 0.6rem;
-        margin-bottom: 1.25rem;
+        margin-top: 1rem;
+        max-width: 30rem;
       }
 
       .key-row[hidden] {
@@ -295,149 +252,133 @@
 
       .key-row input {
         font-family: var(--mono);
-        font-size: 0.9rem;
-        width: min(100%, 26rem);
-        padding: 0.45rem 0.75rem;
+        font-size: 0.85rem;
+        padding: 0.55rem 0.75rem;
         border: 1px solid var(--rule);
         border-radius: 6px;
-        background: var(--warm-white);
+        background: var(--paper);
         color: var(--ink);
       }
 
+      .key-row input[hidden] {
+        display: none;
+      }
+
       .key-note {
+        font-family: var(--sans);
         font-size: 0.85rem;
         color: var(--ink-faint);
-        text-align: center;
       }
 
-      .key-note a {
-        color: var(--accent);
-      }
-
-      /* --- Upload zone --- */
+      /* --- Drop zone: an empty sheet waiting for a paper --- */
       .upload-area {
         margin-top: 1.5rem;
-        position: relative;
       }
 
       .drop-zone {
-        border: 2px dashed var(--rule);
-        border-radius: 12px;
-        padding: 3.5rem 2rem;
-        text-align: center;
-        background: var(--warm-white);
-        cursor: pointer;
-        transition: all 0.3s ease;
         position: relative;
-        overflow: hidden;
+        background: var(--paper);
+        border-radius: 3px;
+        box-shadow: var(--sheet-shadow);
+        padding: 2.75rem 2rem;
+        text-align: center;
+        cursor: pointer;
+        transition:
+          box-shadow 0.2s ease,
+          transform 0.2s ease;
       }
 
       .drop-zone::before {
         content: "";
         position: absolute;
-        inset: 0;
-        background: radial-gradient(
-          circle at 50% 50%,
-          rgba(184, 67, 47, 0.03),
-          transparent 70%
-        );
-        opacity: 0;
-        transition: opacity 0.3s ease;
+        inset: 0.75rem;
+        border: 1.5px dashed var(--rule);
+        border-radius: 2px;
+        pointer-events: none;
+        transition: border-color 0.2s ease;
       }
 
-      .drop-zone:hover {
-        border-color: var(--accent-soft);
-      }
-      .drop-zone:hover::before {
-        opacity: 1;
-      }
-      .drop-zone.drag-over {
+      .drop-zone:hover::before,
+      .drop-zone.drag-over::before {
         border-color: var(--accent);
-        background: rgba(184, 67, 47, 0.03);
-        transform: scale(1.005);
       }
-      .drop-zone.processing {
+
+      .drop-zone.drag-over {
+        transform: translateY(-2px);
+      }
+
+      .drop-zone.processing,
+      .drop-zone.done,
+      .drop-zone.error {
         cursor: default;
+      }
+
+      .drop-zone.processing::before {
         border-style: solid;
         border-color: var(--rule);
-        animation: pulse-border 2s ease-in-out infinite;
       }
-      .drop-zone.done {
-        cursor: default;
+
+      .drop-zone.done::before {
         border-style: solid;
         border-color: var(--green);
       }
-      .drop-zone.error {
-        cursor: default;
+
+      .drop-zone.error::before {
         border-style: solid;
         border-color: var(--accent);
       }
 
-      @keyframes pulse-border {
-        0%,
-        100% {
-          border-color: var(--rule);
-        }
-        50% {
-          border-color: var(--accent-soft);
-        }
-      }
-
       .drop-icon {
-        width: 52px;
-        height: 52px;
-        margin: 0 auto 1rem;
-        opacity: 0.35;
+        width: 34px;
+        height: 34px;
+        color: var(--ink-faint);
+        margin-bottom: 0.75rem;
       }
 
       .drop-zone h3 {
         font-family: var(--serif);
-        font-size: 1.5rem;
-        font-weight: 600;
-        margin-bottom: 0.4rem;
+        font-weight: 400;
+        font-size: 1.45rem;
+        margin-bottom: 0.25rem;
       }
 
       .drop-zone p {
-        font-size: 1rem;
+        font-family: var(--sans);
+        font-size: 0.95rem;
         color: var(--ink-faint);
-        max-width: none;
-        margin: 0 auto;
       }
 
-      .drop-zone .browse {
+      .browse {
         color: var(--accent);
         text-decoration: underline;
-        text-underline-offset: 2px;
+        text-underline-offset: 3px;
         cursor: pointer;
       }
 
       .file-types {
         margin-top: 1rem;
-        font-family: var(--mono);
-        font-size: 0.8rem;
-        color: var(--rule);
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
+        font-family: var(--sans);
+        font-size: 0.85rem;
+        color: var(--ink-faint);
       }
 
       .upload-note {
-        margin-top: 1.25rem;
-        text-align: left;
-        font-size: 0.9rem;
+        margin-top: 1rem;
+        max-width: 34rem;
+        font-family: var(--sans);
+        font-size: 0.85rem;
+        line-height: 1.55;
         color: var(--ink-faint);
-        line-height: 1.6;
-        max-width: none;
       }
 
-      /* --- Progress spinner --- */
       .spinner {
-        width: 40px;
-        height: 40px;
-        border: 3px solid var(--rule-light);
+        width: 28px;
+        height: 28px;
+        border: 2px solid var(--rule);
         border-top-color: var(--accent);
         border-radius: 50%;
         margin: 0 auto 1rem;
-        animation: spin 0.8s linear infinite;
+        animation: spin 0.9s linear infinite;
       }
 
       @keyframes spin {
@@ -446,535 +387,713 @@
         }
       }
 
-      /* --- Progress bar --- */
       .progress-bar {
-        width: 80%;
-        max-width: 300px;
-        height: 6px;
-        background: var(--rule-light);
-        border-radius: 3px;
-        margin: 1rem auto 0.75rem;
+        width: min(100%, 18rem);
+        height: 3px;
+        margin: 0.9rem auto 0.6rem;
+        background: var(--rule);
+        border-radius: 2px;
         overflow: hidden;
       }
 
       .progress-fill {
         height: 100%;
         background: var(--accent);
-        border-radius: 3px;
         transition: width 0.3s ease;
-        width: 0%;
       }
 
-      /* --- Download button --- */
       .download-btn {
         display: inline-block;
         margin-top: 1rem;
-        padding: 0.6rem 1.5rem;
+        padding: 0.65rem 1.4rem;
+        background: var(--ink);
+        color: var(--paper);
         font-family: var(--sans);
-        font-size: 1rem;
-        font-weight: 500;
-        color: white;
-        background: var(--green);
-        border: none;
-        border-radius: 8px;
-        cursor: pointer;
+        font-weight: 600;
+        font-size: 0.95rem;
         text-decoration: none;
-        transition: background 0.2s ease;
+        border-radius: 6px;
       }
 
       .download-btn:hover {
-        background: #256d29;
+        background: var(--accent);
       }
 
       .reset-link {
-        display: inline-block;
         margin-top: 0.75rem;
-        font-size: 0.95rem;
-        color: var(--accent);
-        cursor: pointer;
-        text-decoration: underline;
-        text-underline-offset: 2px;
         background: none;
         border: none;
         font-family: var(--sans);
+        font-size: 0.9rem;
+        color: var(--ink-faint);
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        cursor: pointer;
       }
 
-      /* --- Pipeline steps --- */
-      .pipeline {
+      /* --- Specimen: the same theorem before and after --- */
+      .specimen {
+        position: relative;
+        height: 39rem;
+      }
+
+      .sheet {
+        position: absolute;
+        width: 82%;
+        background: var(--paper);
+        border-radius: 2px;
+        box-shadow: var(--sheet-shadow);
+        padding: 1.6rem 2.4rem 2.6rem;
+        font-size: 1rem;
+        line-height: 1.55;
+        color: var(--ink);
+      }
+
+      .running-head {
+        display: block;
+        margin-bottom: 1.4rem;
+        text-align: center;
+        font-style: italic;
+        font-size: 0.8rem;
+        color: var(--ink-faint);
+      }
+
+      .sheet-fr {
+        top: 0;
+        left: 0;
+        transform: rotate(-2.2deg);
+        color: var(--ink-soft);
+      }
+
+      .sheet-en {
+        top: 12.5rem;
+        right: 0;
+        transform: rotate(1.4deg);
+        animation: slide-out 1s cubic-bezier(0.2, 0.7, 0.2, 1) 0.35s both;
+      }
+
+      @keyframes slide-out {
+        from {
+          transform: translate(-14%, -16%) rotate(-2.2deg);
+        }
+      }
+
+      .sheet-lang {
+        position: absolute;
+        bottom: 0.9rem;
+        right: 1.2rem;
+        font-family: var(--sans);
+        font-size: 0.75rem;
+        color: var(--ink-faint);
+      }
+
+      .sheet-en .sheet-lang {
+        color: var(--accent);
+      }
+
+      .sheet p + p,
+      .sheet p + .display,
+      .sheet .display + p {
+        margin-top: 0.7rem;
+      }
+
+      .sheet .display {
+        text-align: center;
+        overflow-x: auto;
+      }
+
+      .thm-label {
+        font-weight: 700;
+      }
+
+      .thm-body {
+        font-style: italic;
+      }
+
+      .sheet-fade {
+        color: var(--ink-faint);
+      }
+
+      /* --- Sections --- */
+      section {
+        padding: 4.5rem 0;
+      }
+
+      section + section {
+        border-top: 1px solid var(--desk-deep);
+      }
+
+      h2 {
+        font-family: var(--serif);
+        font-weight: 400;
+        font-size: 2.1rem;
+        line-height: 1.2;
+      }
+
+      .section-intro {
+        margin-top: 0.75rem;
+        max-width: 38rem;
+        color: var(--ink-soft);
+      }
+
+      /* How it works: three stages of one line */
+      .steps {
         display: grid;
-        grid-template-columns: 1fr;
-        gap: 0;
-        margin-top: 2rem;
-        border: 1px solid var(--rule);
-        border-radius: 10px;
-        overflow: hidden;
-        background: var(--warm-white);
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1.5rem;
+        margin-top: 2.5rem;
+        list-style: none;
+        counter-reset: step;
       }
 
       .step {
-        padding: 1.5rem 1.8rem;
-        display: grid;
-        grid-template-columns: 3.5rem 1fr;
-        gap: 1rem;
-        align-items: start;
-        border-bottom: 1px solid var(--rule-light);
-        transition: background 0.25s ease;
-      }
-
-      .step:last-child {
-        border-bottom: none;
-      }
-      .step:hover {
-        background: rgba(184, 67, 47, 0.02);
-      }
-
-      .step-num {
-        font-family: var(--serif);
-        font-size: 2rem;
-        font-weight: 700;
-        color: var(--accent);
-        opacity: 0.4;
-        line-height: 1;
-        padding-top: 0.15rem;
+        background: var(--paper);
+        border-radius: 3px;
+        box-shadow: var(--sheet-shadow);
+        padding: 1.75rem 1.75rem 2rem;
+        counter-increment: step;
       }
 
       .step h3 {
         font-family: var(--serif);
-        font-size: 1.3rem;
-        font-weight: 600;
-        margin-bottom: 0.3rem;
+        font-weight: 700;
+        font-size: 1.15rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .step h3::before {
+        content: counter(step) ".";
+        margin-right: 0.45rem;
+        color: var(--accent);
       }
 
       .step p {
         font-size: 1rem;
-        color: var(--ink-faint);
-        line-height: 1.7;
-        max-width: none;
+        color: var(--ink-soft);
       }
 
-      .step code {
-        font-family: var(--mono);
-        font-size: 0.85rem;
-        background: var(--cream);
-        padding: 0.15em 0.4em;
+      .step-sample {
+        margin-top: 1.25rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--rule);
+        font-size: 1.05rem;
+      }
+
+      .step-sample .math-mark {
+        background: var(--accent-wash);
         border-radius: 3px;
-        color: var(--ink-light);
+        padding: 0 0.2em;
       }
 
-      /* --- Features --- */
-      .features-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 1px;
-        margin-top: 2rem;
-        background: var(--rule-light);
-        border: 1px solid var(--rule);
-        border-radius: 10px;
-        overflow: hidden;
-      }
-
-      .feature {
-        padding: 1.5rem;
-        background: var(--warm-white);
-        transition: background 0.2s ease;
-      }
-
-      .feature:hover {
-        background: #fdfcfa;
-      }
-
-      .feature-icon {
-        font-size: 1.3rem;
-        margin-bottom: 0.6rem;
-        opacity: 0.7;
-      }
-
-      .feature h4 {
-        font-family: var(--serif);
-        font-size: 1.15rem;
-        font-weight: 600;
-        margin-bottom: 0.3rem;
-      }
-
-      .feature p {
-        font-size: 0.95rem;
-        color: var(--ink-faint);
-        line-height: 1.6;
-        max-width: none;
-      }
-
-      /* --- CLI section --- */
-      .cli-block {
-        margin-top: 1.5rem;
-        background: var(--ink);
-        border-radius: 10px;
-        overflow: hidden;
-        box-shadow: 0 8px 32px rgba(26, 22, 20, 0.15);
-      }
-
-      .cli-bar {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 0.75rem 1rem;
-        background: rgba(255, 255, 255, 0.06);
-      }
-
-      .cli-dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.12);
-      }
-
-      .cli-dot:nth-child(1) {
-        background: #ff5f57;
-      }
-      .cli-dot:nth-child(2) {
-        background: #ffbd2e;
-      }
-      .cli-dot:nth-child(3) {
-        background: #28c840;
-      }
-
-      .cli-body {
-        padding: 1.25rem 1.5rem;
+      .placeholder {
         font-family: var(--mono);
-        font-size: 0.9rem;
-        line-height: 1.8;
-        color: #c7bfb6;
+        font-size: 0.82em;
+        color: var(--accent);
       }
 
-      .cli-body .prompt {
-        color: var(--accent-soft);
+      /* Engines: a booktabs table */
+      .table-sheet {
+        margin-top: 2.5rem;
+        background: var(--paper);
+        border-radius: 3px;
+        box-shadow: var(--sheet-shadow);
+        padding: 2rem 2.25rem;
+        overflow-x: auto;
       }
-      .cli-body .cmd {
-        color: #e8e2db;
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 1rem;
       }
-      .cli-body .comment {
-        color: #605750;
+
+      thead tr {
+        border-top: 1.5px solid var(--ink);
+        border-bottom: 0.75px solid var(--ink);
+      }
+
+      tbody tr:last-child {
+        border-bottom: 1.5px solid var(--ink);
+      }
+
+      th {
+        text-align: left;
+        font-weight: 700;
+        padding: 0.65rem 1rem;
+      }
+
+      td {
+        padding: 0.55rem 1rem;
+        color: var(--ink-soft);
+        vertical-align: top;
+      }
+
+      th:first-child,
+      td:first-child {
+        padding-left: 0;
+      }
+
+      td:first-child {
+        color: var(--ink);
+        white-space: nowrap;
+      }
+
+      .group-start td {
+        padding-top: 1.1rem;
+      }
+
+      /* Command line */
+      .code-sheet {
+        margin-top: 2.5rem;
+        background: var(--paper);
+        border-radius: 3px;
+        box-shadow: var(--sheet-shadow);
+        padding: 2rem 2.25rem;
+        overflow-x: auto;
+      }
+
+      pre {
+        font-family: var(--mono);
+        font-size: 0.88rem;
+        line-height: 1.85;
+        color: var(--ink);
+      }
+
+      .prompt {
+        color: var(--accent);
+        user-select: none;
+      }
+
+      .comment {
+        color: var(--ink-faint);
         font-style: italic;
       }
-      .cli-body .output {
-        color: #8a7e76;
-      }
 
-      /* --- Footer --- */
       footer {
-        padding: 3rem 0;
-        text-align: center;
-        border-top: 1px solid var(--rule-light);
-      }
-
-      footer p {
-        font-size: 0.95rem;
+        padding: 3rem 0 4rem;
+        border-top: 1px solid var(--desk-deep);
+        font-family: var(--sans);
+        font-size: 0.9rem;
         color: var(--ink-faint);
-        margin: 0 auto;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem 1.75rem;
       }
 
       footer a {
-        color: var(--accent);
-        text-decoration: underline;
-        text-underline-offset: 2px;
+        color: var(--ink-soft);
       }
 
-      /* --- Responsive --- */
+      @media (max-width: 900px) {
+        .hero {
+          grid-template-columns: 1fr;
+          gap: 3rem;
+          padding-top: 1.5rem;
+        }
+
+        .specimen {
+          height: 30rem;
+        }
+
+        .steps {
+          grid-template-columns: 1fr;
+        }
+      }
+
       @media (max-width: 640px) {
         .container {
           padding: 0 1.25rem;
         }
-        /* Clear the beta ribbon in the top-right corner */
-        header {
-          padding: 6.5rem 0 2rem;
-        }
-        .features-grid {
-          grid-template-columns: 1fr;
-        }
-        .step {
-          grid-template-columns: 2.5rem 1fr;
-          padding: 1.2rem;
-        }
-        .math-float {
+
+        .topbar nav a:not(.nav-github) {
           display: none;
         }
-        .lang-row {
-          flex-wrap: wrap;
+
+        .hero {
+          padding-bottom: 2.5rem;
+        }
+
+        section {
+          padding: 3rem 0;
+        }
+
+        .specimen {
+          height: auto;
+        }
+
+        .sheet {
+          position: relative;
+          width: 100%;
+          padding: 1.75rem 1.5rem 2rem;
+        }
+
+        .sheet-fr {
+          display: none;
+        }
+
+        .sheet-en {
+          top: 0;
+          transform: none;
+          animation: none;
+        }
+
+        .table-sheet,
+        .code-sheet {
+          padding: 1.5rem 1.25rem;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        .sheet-en {
+          animation: none;
+        }
+
+        .spinner {
+          animation-duration: 3s;
         }
       }
     </style>
   </head>
   <body>
-    <div class="beta-badge">
-      <a href="https://github.com/joshuaswanson/latex-pdf-translator/issues">
-        <svg viewBox="0 0 24 24">
-          <path
-            d="M9 2h6v2h-1v5.6l4.7 7.9A2 2 0 0116.97 21H7.03a2 2 0 01-1.73-3.5L10 9.6V4H9V2zm3 2h-1v6l-4.5 7.5a.5.5 0 00.43.75h9.14a.5.5 0 00.43-.75L12 10V4z"
-          />
-        </svg>
-        Beta
-      </a>
-    </div>
     <div class="container">
-      <header>
-        <!--
-          Decorative math symbols (KaTeX).
-          Layout: 6 rows, 2.5rem apart, one symbol per side per row.
-          Horizontal positions alternate: edge (~-2rem) and inset (~4rem).
-          Large symbols (sum, prod, int, frac) on edge rows with extra space.
-        -->
-        <!-- Row 1: top 1rem — large display operators on edges -->
-        <span
-          class="math-float"
-          style="left: -2.5rem; top: 1rem; font-size: 2rem"
-          data-tex="\displaystyle\sum_{n=0}^{\infty}"
-        ></span>
-        <span
-          class="math-float"
-          style="right: -1.5rem; top: 1rem; font-size: 2rem"
-          data-tex="\dfrac{\partial f}{\partial x}"
-        ></span>
-        <!-- Row 2: top 5.5rem — small symbols, inset (3.5rem gap after tall sum) -->
-        <span
-          class="math-float"
-          style="left: 4rem; top: 5.5rem; font-size: 1.6rem"
-          data-tex="\xi"
-        ></span>
-        <span
-          class="math-float"
-          style="right: 4.5rem; top: 5.5rem; font-size: 1.7rem"
-          data-tex="\sqrt{x}"
-        ></span>
-        <!-- Row 3: top 8rem — medium expressions, edge -->
-        <span
-          class="math-float"
-          style="left: 0rem; top: 8rem; font-size: 1.7rem"
-          data-tex="\alpha + \beta"
-        ></span>
-        <span
-          class="math-float"
-          style="right: 0rem; top: 8rem; font-size: 1.6rem"
-          data-tex="\infty"
-        ></span>
-        <!-- Row 4: top 10.5rem — small symbols, inset -->
-        <span
-          class="math-float"
-          style="left: 3rem; top: 10.5rem; font-size: 1.6rem"
-          data-tex="\mathbb{R}^n"
-        ></span>
-        <span
-          class="math-float"
-          style="right: 3.5rem; top: 10.5rem; font-size: 1.6rem"
-          data-tex="\nabla f"
-        ></span>
-        <!-- Row 5: top 13rem — large display operators, edge -->
-        <span
-          class="math-float"
-          style="left: -1.5rem; top: 13rem; font-size: 1.8rem"
-          data-tex="\displaystyle\prod_{i=1}^{n}"
-        ></span>
-        <span
-          class="math-float"
-          style="right: -1rem; top: 13rem; font-size: 2.2rem"
-          data-tex="\displaystyle\int_0^1"
-        ></span>
-        <!-- Row 6: top 16.5rem — medium expressions, inset -->
-        <span
-          class="math-float"
-          style="left: 3.5rem; top: 16.5rem; font-size: 1.5rem"
-          data-tex="\Gamma(s)"
-        ></span>
-        <span
-          class="math-float"
-          style="right: 3rem; top: 16.5rem; font-size: 1.5rem"
-          data-tex="\cong"
-        ></span>
-        <h1 aria-label="LaTeX PDF Translator">
-          <span aria-hidden="true"
-            ><span class="latex"
-              >L<span class="latex-a">A</span>T<span class="latex-e">E</span>X</span
-            >
-            PDF <em class="title-accent">Translator</em></span
-          >
-        </h1>
-        <p class="subtitle">
-          Translate LaTeX-typeset PDFs to English.
-        </p>
-        <p class="beta-note">
-          This tool is in beta.
-          <a href="https://github.com/joshuaswanson/latex-pdf-translator/issues"
-            >Feedback welcome.</a
-          >
-        </p>
-      </header>
-
-      <!-- Translate -->
-      <section id="translate">
-        <div class="lang-row">
-          <label for="sourceLang">Translate from</label>
-          <select id="sourceLang">
-            <option value="fr" selected>French</option>
-            <option value="de">German</option>
-          </select>
-          <span class="lang-arrow">&rarr; English</span>
-        </div>
-
-        <div class="lang-row">
-          <label for="engine">Engine</label>
-          <select id="engine">
-            <option value="google" selected>Google Translate (free, no key)</option>
-            <option value="deepl">DeepL</option>
-            <option value="azure">Azure Translator</option>
-            <option value="google-cloud">Google Cloud Translation</option>
-            <option value="claude">Claude</option>
-            <option value="gemini">Gemini</option>
-          </select>
-        </div>
-
-        <div class="key-row" id="keyRow" hidden>
-          <input
-            type="password"
-            id="apiKey"
-            placeholder="API key"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <input
-            type="text"
-            id="region"
-            placeholder="Azure region, e.g. westeurope"
-            autocomplete="off"
-            spellcheck="false"
-            hidden
-          />
-          <p class="key-note">
-            <a id="keyLink" target="_blank" rel="noopener">Get a key</a>.
-            Your key is sent with this request, used only for this translation,
-            and never stored.
-          </p>
-        </div>
-
-        <div class="upload-area">
-          <div class="drop-zone" id="dropZone">
-            <svg
-              class="drop-icon"
-              viewBox="0 0 48 48"
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="LaTeX PDF Translator, beta">
+          <svg class="mark" viewBox="0 0 32 36" aria-hidden="true">
+            <path
+              d="M4 2.5h17l7 7v24H4z"
+              fill="var(--paper)"
+              stroke="var(--ink)"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M21 2.5v7h7z"
+              fill="var(--accent)"
+              stroke="var(--ink)"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M20.5 15.5h-9l4.5 4-4.5 4h9"
               fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
+              stroke="var(--ink)"
+              stroke-width="1.7"
               stroke-linecap="round"
               stroke-linejoin="round"
-            >
-              <path d="M24 32V12M24 12l-8 8M24 12l8 8" />
-              <path d="M8 36v2a4 4 0 004 4h24a4 4 0 004-4v-2" />
-            </svg>
-            <h3>Drop your PDF here</h3>
-            <p>or <span class="browse" id="browseBtn">browse files</span></p>
-            <div class="file-types">.pdf &middot; max 25 MB &middot; 150 pages</div>
-            <input type="file" id="fileInput" accept=".pdf" hidden />
+            />
+            <path
+              d="M9.5 28.5h13"
+              stroke="var(--ink-faint)"
+              stroke-width="1.4"
+              stroke-linecap="round"
+            />
+          </svg>
+          <span>LaTeX PDF Translator <span class="beta">beta</span></span>
+        </a>
+        <nav aria-label="Sections">
+          <a href="#how">How it works</a>
+          <a href="#engines">Engines</a>
+          <a href="#cli">Command line</a>
+          <a
+            class="nav-github"
+            href="https://github.com/joshuaswanson/latex-pdf-translator"
+            >GitHub</a
+          >
+        </nav>
+      </header>
+
+      <main>
+        <div class="hero" id="translate">
+          <div>
+            <h1 class="wordmark" aria-label="LaTeX PDF Translator">
+              <span aria-hidden="true"
+                ><span class="latex"
+                  >L<span class="latex-a">A</span>T<span class="latex-e">E</span
+                  >X</span
+                >
+                PDF <em>Translator</em></span
+              >
+            </h1>
+            <p class="lead">
+              Translate French and German math papers into English. Formulas,
+              fonts and layout stay as they were typeset.
+            </p>
+
+            <div class="controls">
+              <label class="control"
+                >From
+                <select id="sourceLang">
+                  <option value="fr" selected>French</option>
+                  <option value="de">German</option>
+                </select>
+                to English</label
+              >
+              <label class="control"
+                >Engine
+                <select id="engine">
+                  <option value="google" selected>Google Translate (free)</option>
+                  <option value="deepl">DeepL</option>
+                  <option value="azure">Azure Translator</option>
+                  <option value="google-cloud">Google Cloud Translation</option>
+                  <option value="claude">Claude</option>
+                  <option value="gemini">Gemini</option>
+                </select></label
+              >
+            </div>
+
+            <div class="key-row" id="keyRow" hidden>
+              <input
+                type="password"
+                id="apiKey"
+                placeholder="API key"
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="API key"
+              />
+              <input
+                type="text"
+                id="region"
+                placeholder="Azure region, for example westeurope"
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="Azure region"
+                hidden
+              />
+              <p class="key-note">
+                <a id="keyLink" target="_blank" rel="noopener">Get a key</a>.
+                The key is sent with this request, used only for this
+                translation, and never stored.
+              </p>
+            </div>
+
+            <div class="upload-area">
+              <div class="drop-zone" id="dropZone" tabindex="0" role="button">
+                <svg
+                  class="drop-icon"
+                  viewBox="0 0 48 48"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M24 32V12M24 12l-8 8M24 12l8 8" />
+                  <path d="M8 36v2a4 4 0 004 4h24a4 4 0 004-4v-2" />
+                </svg>
+                <h3>Drop a PDF here</h3>
+                <p>or <span class="browse" id="browseBtn">browse files</span></p>
+                <div class="file-types">PDF up to 25 MB and 150 pages</div>
+                <input type="file" id="fileInput" accept=".pdf" hidden />
+              </div>
+              <p class="upload-note">
+                Your PDF is processed on the server and deleted after
+                translation. With Google Translate, your browser sends the
+                extracted text to Google. The first request can take a minute
+                while the free server starts.
+              </p>
+            </div>
           </div>
 
-          <p class="upload-note">
-            Your PDF is processed on my server and not stored after translation.
-            With Google Translate, your browser sends the extracted text to
-            Google directly. The first request may take a minute while the
-            server wakes up.
-            Translation speed depends on document length and the engine. The
-            server runs on a free hosting tier, so processing is slower than a
-            dedicated machine. The command-line tool can also translate with a
-            local model through Ollama or Apple's on-device model.
+          <div class="specimen" aria-label="Example of a translated theorem">
+            <article class="sheet sheet-fr" lang="fr">
+              <span class="running-head">Fonctions d’une variable p-adique</span>
+              <span class="sheet-lang">Français</span>
+              <p>
+                <span class="thm-label">Théorème 1.</span> —
+                <span class="thm-body"
+                  >Soit <span data-tex="f"></span> une fonction continue sur un
+                  intervalle <span data-tex="[a,b]"></span>. Alors
+                  <span data-tex="f"></span> est bornée, atteint ses bornes, et
+                  l’on a</span
+                >
+              </p>
+              <div
+                class="display"
+                data-tex="\int_a^b f(x)\,dx \le (b-a)\sup_{x\in[a,b]}|f(x)|."
+                data-display="true"
+              ></div>
+              <p class="sheet-fade">
+                <em>Démonstration.</em> — Par compacité de
+                <span data-tex="[a,b]"></span>, toute suite
+                <span data-tex="(x_n)"></span> admet une sous-suite convergente…
+              </p>
+              <p>
+                <em>Remarque.</em> — L’hypothèse de continuité est essentielle.
+                La fonction <span data-tex="x \mapsto 1/x"></span> sur
+                <span data-tex="]0,1]"></span> n’est pas bornée.
+              </p>
+            </article>
+            <article class="sheet sheet-en" lang="en">
+              <span class="running-head">Functions of a p-adic variable</span>
+              <span class="sheet-lang">English</span>
+              <p>
+                <span class="thm-label">Theorem 1.</span> —
+                <span class="thm-body"
+                  >Let <span data-tex="f"></span> be a continuous function on an
+                  interval <span data-tex="[a,b]"></span>. Then
+                  <span data-tex="f"></span> is bounded, attains its bounds, and</span
+                >
+              </p>
+              <div
+                class="display"
+                data-tex="\int_a^b f(x)\,dx \le (b-a)\sup_{x\in[a,b]}|f(x)|."
+                data-display="true"
+              ></div>
+              <p class="sheet-fade">
+                <em>Proof.</em> — By compactness of
+                <span data-tex="[a,b]"></span>, every sequence
+                <span data-tex="(x_n)"></span> has a convergent subsequence…
+              </p>
+              <p>
+                <em>Remark.</em> — The continuity hypothesis is essential. The
+                function <span data-tex="x \mapsto 1/x"></span> on
+                <span data-tex="]0,1]"></span> is not bounded.
+              </p>
+            </article>
+          </div>
+        </div>
+
+        <section id="how">
+          <h2>How it works</h2>
+          <p class="section-intro">
+            A LaTeX PDF marks its formulas with dedicated math fonts. The tool
+            uses that to translate the prose and leave the mathematics alone.
           </p>
-        </div>
-      </section>
+          <ol class="steps">
+            <li class="step">
+              <h3>Read the page</h3>
+              <p>
+                Every piece of text is sorted by its font. Math fonts such as
+                CMMI and CMSY mark formulas. Text fonts mark prose.
+              </p>
+              <p class="step-sample" lang="fr">
+                Soit <span class="math-mark" data-tex="f"></span> une fonction
+                continue sur <span class="math-mark" data-tex="[a,b]"></span>.
+              </p>
+            </li>
+            <li class="step">
+              <h3>Translate the prose</h3>
+              <p>
+                Each formula is replaced by a placeholder, so the translator
+                only ever sees words.
+              </p>
+              <p class="step-sample">
+                Let <span class="placeholder">{M0}</span> be a continuous
+                function on <span class="placeholder">{M1}</span>.
+              </p>
+            </li>
+            <li class="step">
+              <h3>Typeset it again</h3>
+              <p>
+                The translation is set in Computer Modern on the original page,
+                and every formula returns to its place.
+              </p>
+              <p class="step-sample">
+                Let <span data-tex="f"></span> be a continuous function on
+                <span data-tex="[a,b]"></span>.
+              </p>
+            </li>
+          </ol>
+        </section>
 
-      <!-- How it works -->
-      <section id="how">
-        <h2>How it works</h2>
-        <p>
-          The tool reads PDF text spans directly and classifies each one as
-          either translatable text or mathematical notation based on the
-          embedded font (e.g. CMMI, CMSY, CMEX for math). Text spans are sent to
-          the selected translation engine with placeholder tokens where math
-          appears. The
-          translated text is then re-rendered into the PDF using CMU Serif and
-          Latin Modern Math, keeping all output as searchable vector text.
-        </p>
-        <p style="margin-top: 0.75rem">
-          Bold, italic, and bold-italic styles are preserved. Table of contents
-          entries, dot leaders, page numbers, and hyperlink annotations are
-          regenerated. Pure-text blocks (without math) are merged into
-          paragraphs before translation for more natural results.
-        </p>
-      </section>
-
-      <!-- CLI -->
-      <section id="cli">
-        <h2>Command line</h2>
-        <p>
-          Clone the repo and run with
-          <code
-            style="
-              font-family: var(--mono);
-              font-size: 0.95rem;
-              background: var(--cream);
-              padding: 0.15em 0.4em;
-              border-radius: 3px;
-            "
-            >uv</code
-          >. No configuration needed.
-        </p>
-
-        <div class="cli-block">
-          <div class="cli-bar">
-            <div class="cli-dot"></div>
-            <div class="cli-dot"></div>
-            <div class="cli-dot"></div>
+        <section id="engines">
+          <h2>Translation engines</h2>
+          <p class="section-intro">
+            Google Translate works without an account. The other engines use
+            your own API key, and two local models run on your own computer
+            through the command-line tool.
+          </p>
+          <div class="table-sheet">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Engine</th>
+                  <th scope="col">What you need</th>
+                  <th scope="col">Available on</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Google Translate</td>
+                  <td>Nothing</td>
+                  <td>Website and command line</td>
+                </tr>
+                <tr>
+                  <td>DeepL</td>
+                  <td>API key, 500,000 characters a month free</td>
+                  <td>Website and command line</td>
+                </tr>
+                <tr>
+                  <td>Azure Translator</td>
+                  <td>API key and region, 2 million characters a month free</td>
+                  <td>Website and command line</td>
+                </tr>
+                <tr>
+                  <td>Google Cloud Translation</td>
+                  <td>API key</td>
+                  <td>Website and command line</td>
+                </tr>
+                <tr>
+                  <td>Claude</td>
+                  <td>Anthropic API key</td>
+                  <td>Website and command line</td>
+                </tr>
+                <tr>
+                  <td>Gemini</td>
+                  <td>API key from Google AI Studio</td>
+                  <td>Website and command line</td>
+                </tr>
+                <tr class="group-start">
+                  <td>Ollama</td>
+                  <td>A local model, for example Qwen 2.5</td>
+                  <td>Command line</td>
+                </tr>
+                <tr>
+                  <td>Apple on-device model</td>
+                  <td>macOS 26 with Apple Intelligence</td>
+                  <td>Command line</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-          <div class="cli-body">
-            <span class="comment"># Clone and install</span><br />
-            <span class="prompt">$</span>
-            <span class="cmd"
-              >git clone
-              https://github.com/joshuaswanson/latex-pdf-translator</span
-            ><br />
-            <span class="prompt">$</span>
-            <span class="cmd">cd latex-pdf-translator</span><br />
-            <br />
-            <span class="comment"># Translate a French PDF to English</span
-            ><br />
-            <span class="prompt">$</span>
-            <span class="cmd">uv run main.py lecture-notes.pdf --source fr</span
-            ><br />
-            <br />
-            <span class="comment"># Translate German to Spanish</span><br />
-            <span class="prompt">$</span>
-            <span class="cmd"
-              >uv run main.py notes.pdf --source de --target es</span
-            ><br />
-            <br />
-            <span class="output">Extracting translatable lines...</span><br />
-            <span class="output"
-              >Found 847 translatable lines across 54 pages</span
-            ><br />
-            <span class="output">Translating via Google Translate...</span
-            ><br />
-            <span class="output">&nbsp; 312 cached, 535 to translate</span
-            ><br />
-            <span class="output">Rendering translations...</span><br />
-            <span class="output">Saved: lecture-notes-en.pdf</span>
+        </section>
+
+        <section id="cli">
+          <h2>Command line</h2>
+          <p class="section-intro">
+            The command-line tool has no page limit and can use the local
+            models. It needs <a href="https://docs.astral.sh/uv/">uv</a>.
+          </p>
+          <div class="code-sheet">
+            <pre><span class="prompt">$ </span>git clone https://github.com/joshuaswanson/latex-pdf-translator
+<span class="prompt">$ </span>cd latex-pdf-translator
+
+<span class="comment"># Translate a French paper to English</span>
+<span class="prompt">$ </span>uv run main.py paper.pdf --source fr
+
+<span class="comment"># Use a local model, with Google for anything it misses</span>
+<span class="prompt">$ </span>uv run main.py paper.pdf --source de --engine ollama --fallback google</pre>
           </div>
-        </div>
-      </section>
+        </section>
+      </main>
 
       <footer>
-        <p>
-          Built by
-          <a href="https://joshuaswanson.github.io">Joshua Swanson</a> &middot;
-          <a href="https://github.com/joshuaswanson/latex-pdf-translator"
-            >Source on GitHub</a
-          >
-          &middot;
-          <a href="https://buymeacoffee.com/swanson">Buy me a coffee</a>
-        </p>
+        <span
+          >Built by
+          <a href="https://joshuaswanson.github.io">Joshua Swanson</a></span
+        >
+        <a href="https://github.com/joshuaswanson/latex-pdf-translator"
+          >Source on GitHub</a
+        >
+        <a href="https://github.com/joshuaswanson/latex-pdf-translator/issues"
+          >Send feedback</a
+        >
+        <a href="https://buymeacoffee.com/swanson">Buy me a coffee</a>
       </footer>
     </div>
 
@@ -1279,11 +1398,20 @@
         return String(str).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
       }
 
-      // Render decorative math symbols with KaTeX
+      dropZone.addEventListener("keydown", (e) => {
+        if (e.target !== dropZone || (e.key !== "Enter" && e.key !== " ")) return;
+        e.preventDefault();
+        if (!dropZone.classList.contains("processing")) fileInput.click();
+      });
+
+      // Typeset the example formulas with KaTeX
       document.addEventListener("DOMContentLoaded", () => {
         const renderMath = () => {
           document.querySelectorAll("[data-tex]").forEach((el) => {
-            katex.render(el.dataset.tex, el, { throwOnError: false });
+            katex.render(el.dataset.tex, el, {
+              throwOnError: false,
+              displayMode: el.dataset.display === "true",
+            });
           });
         };
         if (window.katex) renderMath();
