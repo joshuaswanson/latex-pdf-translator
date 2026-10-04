@@ -77,31 +77,46 @@
       }
 
       /* --- Header --- */
+      /* The title is set in Computer Modern (CMU Serif), the typeface of the
+         documents this tool translates, subset to the title's letters. */
+      @font-face {
+        font-family: "CMU Serif Title";
+        src: url("fonts/cmu-serif-title.woff2") format("woff2");
+        font-display: swap;
+      }
+
       header {
-        padding: 4rem 0 2rem;
+        padding: 5rem 0 2rem;
         text-align: center;
         position: relative;
       }
 
-      .header-rule {
-        width: 60px;
-        height: 1.5px;
-        background: var(--accent);
-        margin: 0 auto 2rem;
-      }
-
       header h1 {
-        font-family: var(--serif);
-        font-weight: 700;
-        font-size: clamp(2.6rem, 5.5vw, 4rem);
-        letter-spacing: -0.02em;
+        font-family: "CMU Serif Title", var(--serif);
+        font-weight: 400;
+        font-size: clamp(2.1rem, 4.6vw, 3.3rem);
         line-height: 1.15;
-        margin-bottom: 0.6rem;
+        margin-bottom: 0.9rem;
         color: var(--ink);
       }
 
-      header h1 span {
-        color: var(--accent);
+      .latex {
+        white-space: nowrap;
+      }
+
+      /* The LaTeX logo, with the kerning and offsets of the \LaTeX macro */
+      .latex-a {
+        font-size: 0.72em;
+        vertical-align: 0.22em;
+        margin-left: -0.36em;
+        margin-right: -0.15em;
+      }
+
+      .latex-e {
+        position: relative;
+        top: 0.22em;
+        margin-left: -0.1667em;
+        margin-right: -0.125em;
       }
 
       .subtitle {
@@ -657,8 +672,9 @@
         .container {
           padding: 0 1.25rem;
         }
+        /* Clear the beta ribbon in the top-right corner */
         header {
-          padding: 3rem 0 2rem;
+          padding: 6.5rem 0 2rem;
         }
         .features-grid {
           grid-template-columns: 1fr;
@@ -761,8 +777,14 @@
           style="right: 3rem; top: 16.5rem; font-size: 1.5rem"
           data-tex="\cong"
         ></span>
-        <div class="header-rule"></div>
-        <h1>LaTeX PDF <span>Translator</span></h1>
+        <h1 aria-label="LaTeX PDF Translator">
+          <span aria-hidden="true"
+            ><span class="latex"
+              >L<span class="latex-a">A</span>T<span class="latex-e">E</span>X</span
+            >
+            PDF Translator</span
+          >
+        </h1>
         <p class="subtitle">
           Translate LaTeX-typeset PDFs to English.
         </p>
