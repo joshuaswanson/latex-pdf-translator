@@ -367,6 +367,10 @@ def translate_lines(lines: list[TranslatableLine], engine: Engine,
                 if retried[i] is not None:
                     translated[i] = retried[i]
                     term_fixes[i] = uses_term_fixes(fallback.apply_term_fixes, fallback.target)
+        still_failed = sum(t is None for t in translated)
+        if still_failed and not fallback:
+            print(f"  {still_failed} segments stayed in the original language. Running again "
+                  f"retries them, and --fallback sends them to a second engine.")
     finally:
         if cache_path:
             _save_cache(cache_path, cache)

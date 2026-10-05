@@ -229,3 +229,16 @@ def test_llm_request_carries_neighboring_text_as_context():
 
     assert engine.requests == [{"items": ["Soit {M0}"], "before": "Théorème 2.",
                                 "after": "une fonction continue."}]
+
+
+def test_llm_drops_invented_and_repeated_placeholders():
+    engine = ScriptedLLM([["Let {M0} be {M0} a function", "the case {M3} at hand"]])
+
+    assert engine.translate_batch(["Soit {M0} une fonction", "le cas présent"]) == [
+        "Let {M0} be a function", "the case at hand"]
+
+
+def test_llm_still_rejects_a_missing_placeholder():
+    engine = ScriptedLLM([["Let be a function {M7}"], ["Let be a function"]])
+
+    assert engine.translate_batch(["Soit {M0} une fonction"]) == [None]

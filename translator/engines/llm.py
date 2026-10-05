@@ -8,13 +8,15 @@ then given up on.
 
 import asyncio
 import json
+import re
+from collections import Counter
 from collections.abc import Sequence
 
 import requests
 
 from translator.engines.base import (
-    Engine, EngineError, RateLimitedError, language_name, placeholders, post_json,
-    retry_after_seconds,
+    PLACEHOLDER_RE, Engine, EngineError, RateLimitedError, language_name, placeholders,
+    post_json, retry_after_seconds,
 )
 
 TRANSLATIONS_SCHEMA = {
@@ -74,10 +76,14 @@ class LLMEngine(Engine):
         translations = self.complete(request_json(texts, context), len(texts), note)
         if translations is None or len(translations) != len(texts):
             return [None] * len(texts)
-        return [
-            t if t is not None and placeholders(t) == placeholders(text) else None
-            for text, t in zip(texts, translations)
-        ]
+        checked = []
+        for text, translation in zip(texts, translations):
+            if translation is not None:
+                translation = _drop_extra_placeholders(translation, text)
+                if placeholders(translation) != placeholders(text):
+                    translation = None
+            checked.append(translation)
+        return checked
 
     def complete(self, request: str, count: int, note: str = "") -> Sequence[str | None] | None:
         """One model request for `count` items, with `note` appended to the instructions.
@@ -253,6 +259,24 @@ class AppleEngine(LLMEngine):
                 fm.DecodingFailureError):
             return None
         return list(result.translations)
+
+
+def _drop_extra_placeholders(translation: str, template: str) -> str:
+    """Remove placeholders the model invented or repeated.
+
+    A token missing from the translation still fails the check, because that
+    formula would be lost.
+    """
+    allowed = Counter(PLACEHOLDER_RE.findall(template))
+    seen = Counter()
+
+    def keep_allowed(match):
+        token = match.group(0)
+        seen[token] += 1
+        return token if seen[token] <= allowed[token] else ""
+
+    cleaned = PLACEHOLDER_RE.sub(keep_allowed, translation)
+    return re.sub(r" {2,}", " ", cleaned).strip() if cleaned != translation else translation
 
 
 def request_json(texts: list[str], context: tuple[str, str]) -> str:
