@@ -6,6 +6,7 @@ the server's cloud IP addresses: /extract returns the text segments, the
 browser translates them, and /render turns the translations into the PDF.
 """
 
+import os
 import threading
 import traceback
 import uuid
@@ -39,11 +40,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Rendering takes about 0.8 MB of memory per page. These limits keep two
-# concurrent jobs inside the free server's 512 MB.
-MAX_CONCURRENT = 2
-MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
-MAX_PAGES = 150
+# Rendering takes about 0.8 MB of memory per page. The defaults keep two
+# concurrent jobs inside the free server's 512 MB; a larger server can raise
+# them through environment variables.
+MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT_JOBS", 2))
+MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", 25))
+MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024
+MAX_PAGES = int(os.environ.get("MAX_PAGES", 150))
 JOB_TTL_SECONDS = 600
 # Long documents take the browser several minutes to translate
 AWAITING_TRANSLATION_TTL_SECONDS = 3600
@@ -141,7 +144,7 @@ async def _read_pdf(file: UploadFile) -> bytes:
         raise HTTPException(400, "Please upload a PDF file.")
     pdf_bytes = await file.read(MAX_FILE_SIZE + 1)
     if len(pdf_bytes) > MAX_FILE_SIZE:
-        raise HTTPException(400, "File too large. Maximum size is 25 MB.")
+        raise HTTPException(400, f"File too large. Maximum size is {MAX_FILE_SIZE_MB} MB.")
     try:
         with pymupdf.open("pdf", pdf_bytes) as doc:
             page_count = len(doc)
