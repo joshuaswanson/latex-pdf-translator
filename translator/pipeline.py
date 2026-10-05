@@ -63,4 +63,6 @@ def render_pdf(pdf_bytes: bytes, lines: list[TranslatableLine], translations: li
     # before fixing link borders and rectangles.
     with pymupdf.open("pdf", rendered) as doc:
         fix_link_annotations(doc, *link_info)
+        # The CMU and Latin Modern Math fonts are embedded whole until subset
+        doc.subset_fonts()
         return doc.tobytes(garbage=4, deflate=True)
