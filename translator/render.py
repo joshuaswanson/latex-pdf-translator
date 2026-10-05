@@ -83,32 +83,27 @@ MIN_TEXT_SCALE = 0.7
 
 
 class PageText:
-    """Collects a page's text and writes it in one go.
+    """Collects a line's text and writes it in reading order.
 
     page.insert_text rescans every font resource on the page on each call,
-    which dominated rendering time on pages with many copied glyphs.
+    which dominated rendering time on pages with many copied glyphs. Text is
+    gathered into runs that share one transformation, and each run is written
+    with a single TextWriter.
     """
 
     def __init__(self, rect: pymupdf.Rect):
         self._rect = rect
-        self._writer = pymupdf.TextWriter(rect)
-        self._has_text = False
-        self._condensed = []
+        self._runs = []  # [(TextWriter, morph or None), ...] in reading order
 
-    def add(self, point: tuple, text: str, font: pymupdf.Font, fontsize: float):
-        self._writer.append(point, text, font=font, fontsize=fontsize)
-        self._has_text = True
-
-    def condensed(self, fixpoint: pymupdf.Point, scale: float) -> pymupdf.TextWriter:
-        """A writer whose text is condensed horizontally by `scale` around `fixpoint`."""
-        writer = pymupdf.TextWriter(self._rect)
-        self._condensed.append((writer, (fixpoint, pymupdf.Matrix(scale, 1))))
-        return writer
+    def add(self, point: tuple, text: str, font: pymupdf.Font, fontsize: float,
+            morph: tuple | None = None):
+        """Add text, optionally transformed by `morph` = (fixpoint, matrix)."""
+        if not self._runs or self._runs[-1][1] is not morph:
+            self._runs.append((pymupdf.TextWriter(self._rect), morph))
+        self._runs[-1][0].append(point, text, font=font, fontsize=fontsize)
 
     def write(self, page):
-        if self._has_text:
-            self._writer.write_text(page)
-        for writer, morph in self._condensed:
+        for writer, morph in self._runs:
             writer.write_text(page, morph=morph)
 
 
@@ -476,9 +471,9 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
         right_limit = _toc_text_limit(line, fontsize, toc_font_obj)
     text_scale = _fit_text_scale(line, styled_segments, fontsize, right_limit - x0)
 
-    # Render from left to right. Condensed text goes to a writer scaled around
-    # the line start, so each segment is placed at its unscaled position.
-    condensed = None
+    # Render from left to right. Condensed text is scaled around the line
+    # start, so each segment is placed at its unscaled position.
+    condense = (pymupdf.Point(x0, baseline_y), pymupdf.Matrix(text_scale, 1))
     x = x0
     for text, style in styled_segments:
         if style == "math":
@@ -494,10 +489,8 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
                 continue
             font_obj = FONT_OBJECTS[style]
             if text_scale < 1:
-                if condensed is None:
-                    condensed = page_text.condensed(pymupdf.Point(x0, baseline_y), text_scale)
-                condensed.append((x0 + (x - x0) / text_scale, baseline_y), text,
-                                 font=font_obj, fontsize=fontsize)
+                page_text.add((x0 + (x - x0) / text_scale, baseline_y), text, font_obj,
+                              fontsize, morph=condense)
             else:
                 page_text.add((x, baseline_y), text, font_obj, fontsize)
             x += font_obj.text_length(text, fontsize=fontsize) * text_scale
