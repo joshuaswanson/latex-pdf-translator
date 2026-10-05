@@ -61,9 +61,22 @@ The website offers the engines that run on the server and asks for the key in th
 
 Run the tests with `uv run pytest`. They use small LaTeX fixtures in `tests/fixtures` and a fake engine, so they need no network access.
 
+## Running the server
+
+The website talks to `server.py`, a FastAPI app (`uvicorn server:app`). Its limits are set for a free 512 MB server and can be raised with environment variables:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MAX_PAGES` | 150 | Longest PDF accepted |
+| `MAX_FILE_SIZE_MB` | 25 | Largest upload accepted |
+| `MAX_CONCURRENT_JOBS` | 2 | Jobs extracting or rendering at once |
+
+Rendering takes roughly 0.8 MB of memory per page.
+
 ## Limitations
 
-- Lines that contain math are translated one line at a time, so sentences that span several lines lose context
+- Lines that contain math are translated one line at a time. LLM engines see the neighboring lines as context, the other engines do not
+- Local models occasionally leave a line in the original language. Running again retries it, and `--fallback google` translates whatever remains
 - Big delimiters and operators (CMEX), script and Fraktur letters, small caps, and glyphs in unknown fonts are copied from the original page
 - Translated lines wider than their text column are condensed horizontally to at most 70% of their natural width; beyond that they overflow
 - Terminology fixes for common machine translation mistakes in math prose apply only to English output from the google, deepl, azure and google-cloud engines
