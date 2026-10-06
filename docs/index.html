@@ -107,32 +107,8 @@
       .topbar {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: flex-end;
         padding: 1.5rem 0;
-      }
-
-      .brand {
-        display: flex;
-        align-items: center;
-        gap: 0.6rem;
-        color: var(--ink);
-        text-decoration: none;
-        font-family: var(--sans);
-        font-weight: 600;
-        font-size: 1rem;
-      }
-
-      .mark {
-        width: 26px;
-        height: 30px;
-        flex: none;
-      }
-
-      .beta {
-        font-family: var(--serif);
-        font-style: italic;
-        font-weight: 400;
-        color: var(--ink-faint);
       }
 
       .topbar nav {
@@ -761,39 +737,6 @@
   <body>
     <div class="container">
       <header class="topbar">
-        <a class="brand" href="#" aria-label="LaTeX PDF Translator, beta">
-          <svg class="mark" viewBox="0 0 32 36" aria-hidden="true">
-            <path
-              d="M4 2.5h17l7 7v24H4z"
-              fill="var(--paper)"
-              stroke="var(--ink)"
-              stroke-width="1.6"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M21 2.5v7h7z"
-              fill="var(--accent)"
-              stroke="var(--ink)"
-              stroke-width="1.6"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M20.5 15.5h-9l4.5 4-4.5 4h9"
-              fill="none"
-              stroke="var(--ink)"
-              stroke-width="1.7"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M9.5 28.5h13"
-              stroke="var(--ink-faint)"
-              stroke-width="1.4"
-              stroke-linecap="round"
-            />
-          </svg>
-          <span class="beta">beta</span>
-        </a>
         <nav aria-label="Sections">
           <a href="#how">How it works</a>
           <a href="#engines">Engines</a>
