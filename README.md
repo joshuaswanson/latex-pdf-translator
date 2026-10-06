@@ -75,7 +75,6 @@ Rendering takes roughly 0.8 MB of memory per page.
 
 ## Limitations
 
-- Scanned PDFs have no text layer. Run OCR on them first
 - Translated text is set in the original typeface for Computer Modern, Latin Modern, Times and Palatino papers. Papers in other typefaces get Computer Modern text
 - In Times and Palatino papers, math letters share the italic text font. The tool tells them apart by context, which can misjudge an unusual line
 - Lines that contain math are translated one line at a time, because translation services do not reliably keep formulas in place across lines. LLM engines see the neighboring lines as context
