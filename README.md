@@ -4,7 +4,7 @@ Translates LaTeX-typeset PDFs to English while preserving mathematical notation.
 
 ## How it works
 
-1. **Extract** - Parse PDF text spans, classify as translatable text or math notation (CMMI, CMSY, CMEX, etc.) by font. Text fonts are cm-super (SFRM, SFBX, SFTI), Latin Modern (LMRoman), or Computer Modern (CMR, CMBX, CMTI); in the last two, spans that contain only digits, operators, or operator names like `sin` count as math
+1. **Extract** - Parse PDF text spans and classify each as translatable text or math notation. Dedicated math fonts (CMMI, CMSY, CMEX, AMS, PazoMath, txfonts and others) are always math. Any other font is text when it contains words. Digits, operators, operator names like `sin`, subscript-sized words, and lone italic letters in upright prose count as math. This covers Computer Modern, Latin Modern, cm-super, Times, Palatino and other typefaces
 2. **Translate** - Send text to the chosen engine with `{M0}` placeholders for math spans. Each engine protects the placeholders in its own way (opaque tokens, XML or HTML tags, or instructions to an LLM), and translations whose placeholders come back altered are retried
 3. **Render** - Remove original text via PDF redaction, re-render translated text using CMU Serif fonts and math symbols using Latin Modern Math with proper Unicode math italic/bold code points
 
@@ -75,10 +75,11 @@ Rendering takes roughly 0.8 MB of memory per page.
 
 ## Limitations
 
-- Only PDFs typeset in Computer Modern, Latin Modern or cm-super are recognized. Papers in other typefaces (Times, Palatino) and scanned PDFs give "No translatable text found"
-- Lines that contain math are translated one line at a time. LLM engines see the neighboring lines as context, the other engines do not
-- LLM engines, local models most of all, occasionally leave a line in the original language. Running again retries it, and `--fallback google` translates whatever remains
-- Where a PDF stores a formula character and a word in one piece of text, the whole piece is treated as prose
-- Big delimiters and operators (CMEX), script and Fraktur letters, small caps, and glyphs in unknown fonts are copied from the original page
-- Translated lines wider than their text column are condensed horizontally to at most 70% of their natural width; beyond that they overflow
-- Terminology fixes for common machine translation mistakes in math prose apply only to English output from the google, deepl, azure and google-cloud engines
+- Scanned PDFs have no text to read and give "No translatable text found"
+- Translated text is always set in Computer Modern, also in papers typeset in Times or Palatino. Formulas keep their original glyphs
+- In Times and Palatino papers, math letters share the italic text font. The tool tells them apart by context, which can misjudge an unusual line
+- Lines that contain math are translated one line at a time, because the translation services cannot be trusted to keep formulas in place across lines. LLM engines see the neighboring lines as context
+- LLM engines, local models most of all, occasionally mangle a line. The tool asks a second time, and `--fallback google` translates whatever still remains
+- Translated lines wider than their text column are condensed to 70% of their width and then set 15% smaller. Beyond that they overflow
+
+Two things that work as intended: glyphs the tool cannot re-create (big delimiters, radicals, script and Fraktur letters, small caps, math in other typefaces) are copied from the original page, and the terminology fixes for math prose apply only to English output from the google, deepl, azure and google-cloud engines, whose typical mistakes they target.
