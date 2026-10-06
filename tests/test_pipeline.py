@@ -1,13 +1,13 @@
 import pymupdf
 import pytest
 
-from conftest import FONT_VARIANTS, FakeEngine, fixture_pdf_bytes
+from conftest import FONT_VARIANTS, OTHER_TYPEFACES, FakeEngine, fixture_pdf_bytes
 from translator.pipeline import NoTranslatableTextError, translate_pdf
 from translator.extract import Span, TranslatableLine
 from translator.render import _find_extent, _find_stacked_spans, _lines_hit_by_redaction
 
 
-@pytest.mark.parametrize("variant", FONT_VARIANTS)
+@pytest.mark.parametrize("variant", FONT_VARIANTS + OTHER_TYPEFACES)
 def test_translates_fixture_end_to_end(variant):
     result = translate_pdf(fixture_pdf_bytes(variant), FakeEngine())
 

@@ -8,16 +8,23 @@ from dataclasses import dataclass
 # cm-super fonts (T1 encoding) only ever hold text.
 CM_SUPER_TEXT_FONT_RE = re.compile(r"SF(?:RM|BX|BI|TI|SL)\d")
 
-# Computer Modern and Latin Modern roman fonts typeset body text in documents
-# without cm-super, but they also typeset digits, operators and operator names
-# inside math.
-SHARED_ROMAN_FONT_RE = re.compile(
-    r"CM(?:R|BX|TI|BXTI|SL)\d|LMRoman(?:Slant)?\d+-(?:Regular|Bold|Italic|BoldItalic)\b"
+# Fonts that only ever hold mathematics, across the common LaTeX math packages
+# (Computer Modern, AMS, Latin Modern, mathpazo, txfonts and pxfonts and their
+# successors, MathTime, STIX and other OpenType math fonts).
+MATH_FONT_RE = re.compile(
+    r"CM(?:MI|SY|EX|BSY)|MS[AB]M|rsfs|EU[FRSE][MBX]|Math|Symbol|MT(?:MI|SY|EX)|"
+    r"(?:tx|px|ntx|npx)(?:b?mi|sy|ex)|esint|wasy|stmary|bbm|bbold|dsrom|lasy|"
+    r"l?circle|line\d",
+    re.IGNORECASE,
 )
 
-# Whitespace and punctuation in a shared roman font belong to whichever of
-# text or math follows them. Other shared roman spans without words (digits,
-# single letters, operators) are text only between text on both sides.
+# Small caps and typewriter fonts hold names and code. They are left as typeset.
+UNTRANSLATED_FONT_RE = re.compile(
+    r"CMCSC|CMTT|CMSLTT|SFCC|SFTT|SFSC|Caps|-SC\b|Mono|Typewriter|Courier", re.IGNORECASE)
+
+# Whitespace and punctuation in a text font belong to whichever of text or
+# math follows them. Other spans without words (digits, single letters,
+# operators) are text only between text on both sides.
 SEPARATOR_RE = re.compile(r"[\s,.;:!?]*")
 
 # OT1 fonts have no accented letters, so TeX stacks a spacing accent glyph on
@@ -51,8 +58,23 @@ PLACEHOLDER_RE = re.compile(r"\{M(\d+)\}")
 HYPHENATED_END_RE = re.compile(r"[^\W\d_]-$")
 CONTINUATION_RE = re.compile(r"([^\W\d_]+)\s*")
 
-BOLD_FONT_RE = re.compile(r"SFB[XI]|CMBX|-Bold")
-ITALIC_FONT_RE = re.compile(r"SF(?:BI|TI|SL)|CM(?:BX)?TI|CMSL|Italic|Slant")
+BOLD_FONT_RE = re.compile(r"SFB[XI]|CMBX|Bold|Demi|Medi|Heavy|Black")
+ITALIC_FONT_RE = re.compile(r"SF(?:BI|TI|SL)|CM(?:BX)?TI|CMSL|Ital|Slant|Obli")
+
+# Characters at the edge of a prose span that belong to an adjacent formula.
+# Opening brackets stay with the prose that follows a formula, closing
+# brackets with the prose that precedes one. The ASCII hyphen is left out: in
+# a text font it joins words ("p-adique"), and TeX's minus sign is U+2212.
+OPERATORS_ONLY_RE = re.compile(r"[+\u2212=<>/*^|]+")
+MATH_PREFIX_RE = re.compile(r"[\d+\u2212=<>/*^|)\]}]*")
+MATH_SUFFIX_RE = re.compile(r"[\d+\u2212=<>/*^|(\[{]*$")
+
+# Text below this fraction of the line's main size is a sub- or superscript
+SCRIPT_SIZE_RATIO = 0.8
+
+# Bits of a span's flags as reported by MuPDF
+FLAG_ITALIC = 2
+FLAG_BOLD = 16
 
 MATH_OPERATOR_NAMES = {
     "sin", "cos", "tan", "cot", "sec", "csc", "arcsin", "arccos", "arctan",
@@ -73,11 +95,22 @@ ENGLISH_FUNCTION_WORDS = {
 
 # -- Font classification ----------------------------------------------------
 
-def is_text_span(font: str, text: str, roman_is_text: bool) -> bool:
-    """True if a span holds translatable text (vs math notation)."""
+def is_text_span(font: str, text: str, text_shares_fonts: bool) -> bool:
+    """True if a span holds translatable text (vs math notation).
+
+    cm-super documents keep text and math in separate fonts. In every other
+    document the text fonts also typeset digits, operators and operator names
+    inside math, so a span is text only when it contains words.
+    """
     if CM_SUPER_TEXT_FONT_RE.search(font):
         return True
-    return roman_is_text and bool(SHARED_ROMAN_FONT_RE.search(font)) and _has_words(text)
+    return text_shares_fonts and is_shared_text_font(font) and _has_words(text)
+
+
+def is_shared_text_font(font: str) -> bool:
+    """True for a font that can hold prose in a document without cm-super."""
+    return not (MATH_FONT_RE.search(font) or UNTRANSLATED_FONT_RE.search(font)
+                or CM_SUPER_TEXT_FONT_RE.search(font))
 
 
 def _has_words(text: str) -> bool:
@@ -86,8 +119,9 @@ def _has_words(text: str) -> bool:
 
 
 def _resolve_wordless_spans(spans: list["Span"]):
-    """Decide text or math for shared roman spans without words from their neighbors."""
-    wordless = [bool(SHARED_ROMAN_FONT_RE.search(s.font)) and not s.is_text for s in spans]
+    """Decide text or math for text-font spans without words from their neighbors."""
+    wordless = [is_shared_text_font(s.font) and not s.is_text and not s.is_variable
+                for s in spans]
     separator = [w and bool(SEPARATOR_RE.fullmatch(s.text)) for w, s in zip(wordless, spans)]
 
     for i, span in enumerate(spans):
@@ -105,6 +139,24 @@ def _resolve_wordless_spans(spans: list["Span"]):
         prev = next((spans[j] for j in range(i - 1, -1, -1) if not separator[j]), None)
         neighbor = following or prev
         span.is_text = neighbor is not None and neighbor.is_text
+
+
+def _demote_script_spans(spans: list["Span"]):
+    """Treat words set clearly smaller than the line's text as math.
+
+    A word in a subscript, as in d_eukl, sits in the text font. Translating it
+    as prose would lose its position.
+    """
+    chars_by_size = {}
+    for span in spans:
+        if span.is_text:
+            chars_by_size[span.size] = chars_by_size.get(span.size, 0) + len(span.text)
+    if not chars_by_size:
+        return
+    main_size = max(chars_by_size, key=chars_by_size.get)
+    for span in spans:
+        if span.is_text and span.size < SCRIPT_SIZE_RATIO * main_size:
+            span.is_text = False
 
 
 def _merge_text_runs(spans: list["Span"]) -> list["Span"]:
@@ -127,6 +179,7 @@ def _merge_text_runs(spans: list["Span"]) -> list["Span"]:
                 ink_bbox=_union(previous.ink_bbox, span.ink_bbox),
                 origin=previous.origin,
                 is_text=True,
+                style=previous.style,
             )
         else:
             merged.append(span)
@@ -157,10 +210,10 @@ def is_extension_font(font: str) -> bool:
     return bool(EXTENSION_FONT_RE.search(font))
 
 
-def _get_font_style(fontname: str) -> str:
-    """Determine font style from the original font name."""
-    is_bold = bool(BOLD_FONT_RE.search(fontname))
-    is_italic = bool(ITALIC_FONT_RE.search(fontname))
+def _get_font_style(fontname: str, flags: int = 0) -> str:
+    """Determine font style from the font name and the flags MuPDF reports."""
+    is_bold = bool(BOLD_FONT_RE.search(fontname)) or bool(flags & FLAG_BOLD)
+    is_italic = bool(ITALIC_FONT_RE.search(fontname)) or bool(flags & FLAG_ITALIC)
     if is_bold and is_italic:
         return "bolditalic"
     if is_bold:
@@ -181,6 +234,8 @@ class Span:
     ink_bbox: tuple  # bbox of the non-whitespace characters
     origin: tuple  # (x, y) baseline point
     is_text: bool
+    style: str = "regular"  # "regular", "bold", "italic" or "bolditalic"
+    is_variable: bool = False  # an italic letter in upright prose, i.e. a math variable
 
 
 @dataclass(slots=True)
@@ -200,18 +255,109 @@ class TranslatableLine:
 
 # -- Extraction -------------------------------------------------------------
 
+def _drop_rotated_lines(raw: dict):
+    """Remove text that does not run left to right, such as arXiv's margin stamp."""
+    for block in raw["blocks"]:
+        if "lines" in block:
+            block["lines"] = [line for line in block["lines"] if abs(line["dir"][1]) < 0.01]
+
+
 def _add_span_text(raw: dict):
     """Add "text" and "ink_bbox" to every span of a rawdict page."""
     for block in raw["blocks"]:
         for line in block.get("lines", []):
             for span in line["spans"]:
-                span["text"] = "".join(c["c"] for c in span["chars"])
-                ink = [c["bbox"] for c in span["chars"] if c["c"].strip()]
-                span["ink_bbox"] = (
-                    (min(b[0] for b in ink), min(b[1] for b in ink),
-                     max(b[2] for b in ink), max(b[3] for b in ink))
-                    if ink else span["bbox"]
-                )
+                _set_text_and_ink(span)
+
+
+def _set_text_and_ink(span: dict):
+    span["text"] = "".join(c["c"] for c in span["chars"])
+    ink = [c["bbox"] for c in span["chars"] if c["c"].strip()]
+    span["ink_bbox"] = (
+        (min(b[0] for b in ink), min(b[1] for b in ink),
+         max(b[2] for b in ink), max(b[3] for b in ink))
+        if ink else span["bbox"]
+    )
+
+
+def _mark_math_variables(spans: list[dict]):
+    """Flag italic letters in upright prose as math variables.
+
+    Times and Palatino documents set math letters in the italic text font, so
+    the font alone cannot tell "f" the variable from prose. In upright prose a
+    lone italic letter or two is a variable. In italic prose, such as a theorem
+    statement, nothing is flagged.
+    """
+    upright = italic = 0
+    for span in spans:
+        if is_shared_text_font(span["font"]) and _has_words(span["text"]):
+            if "italic" in _get_font_style(span["font"], span.get("flags", 0)):
+                italic += len(span["text"])
+            else:
+                upright += len(span["text"])
+    if upright <= italic:
+        return
+
+    def in_italic_phrase(i: int) -> bool:
+        """True if the nearest non-blank neighbor is a word in the same font ("a priori")."""
+        for step in (-1, 1):
+            j = i + step
+            while 0 <= j < len(spans) and not spans[j]["text"].strip():
+                j += step
+            if (0 <= j < len(spans) and spans[j]["font"] == spans[i]["font"]
+                    and _has_words(spans[j]["text"])):
+                return True
+        return False
+
+    for i, span in enumerate(spans):
+        span["is_variable"] = (
+            is_shared_text_font(span["font"])
+            and "italic" in _get_font_style(span["font"], span.get("flags", 0))
+            and not _has_words(span["text"])
+            and any(c.isalpha() for c in span["text"])
+            and not in_italic_phrase(i)
+        )
+
+
+def _is_math(span: dict) -> bool:
+    """True for a span that is certainly math: a math font, a variable, or bare operators."""
+    return (bool(MATH_FONT_RE.search(span["font"])) or span.get("is_variable", False)
+            or bool(OPERATORS_ONLY_RE.fullmatch(span["text"].strip())))
+
+
+def _split_mixed_spans(spans: list[dict]) -> list[dict]:
+    """Split text spans that start or end with a piece of the neighboring formula.
+
+    Where math and prose share a font, "x" followed by "+2 pour tout" puts the
+    "+2" in the prose span. The math-looking characters next to a math span
+    become their own span, which then resolves to math.
+    """
+    result = []
+    for i, span in enumerate(spans):
+        if not (is_shared_text_font(span["font"]) and _has_words(span["text"])):
+            result.append(span)
+            continue
+        text = span["text"]
+        start, end = 0, len(text)
+        if i > 0 and _is_math(spans[i - 1]):
+            start = MATH_PREFIX_RE.match(text).end()
+        if i + 1 < len(spans) and _is_math(spans[i + 1]):
+            end = MATH_SUFFIX_RE.search(text).start()
+        pieces = [(0, start), (start, end), (end, len(text))]
+        result.extend(_slice_span(span, a, b) for a, b in pieces if b > a)
+    return result
+
+
+def _slice_span(span: dict, start: int, end: int) -> dict:
+    if start == 0 and end == len(span["chars"]):
+        return span
+    chars = span["chars"][start:end]
+    piece = dict(span, chars=chars, origin=chars[0]["origin"], bbox=(
+        min(c["bbox"][0] for c in chars), span["bbox"][1],
+        max(c["bbox"][2] for c in chars), span["bbox"][3],
+    ))
+    _set_text_and_ink(piece)
+    return piece
 
 
 def _line_core_y(line):
@@ -236,7 +382,7 @@ def _is_cmex_only(line):
     return all(is_extension_font(s["font"]) for s in line["spans"])
 
 
-def _merge_same_y_lines(lines, roman_is_text: bool, max_x_gap=8):
+def _merge_same_y_lines(lines, text_shares_fonts: bool, max_x_gap=8):
     """Merge raw PDF lines that are on the same visual line (y-ranges overlap).
 
     This handles cases like d/dx fractions where the numerator, denominator,
@@ -299,7 +445,7 @@ def _merge_same_y_lines(lines, roman_is_text: bool, max_x_gap=8):
 
     def text_baseline(line) -> float | None:
         baselines = [s["origin"][1] for s in line["spans"]
-                     if is_text_span(s["font"], s["text"], roman_is_text)]
+                     if is_text_span(s["font"], s["text"], text_shares_fonts)]
         return min(baselines) if baselines else None
 
     def has_text(line):
@@ -363,13 +509,14 @@ def _merge_same_y_lines(lines, roman_is_text: bool, max_x_gap=8):
 def extract_lines(doc) -> list[TranslatableLine]:
     """Extract all lines containing translatable text."""
     result = []
-    roman_is_text = not _uses_cm_super(doc)
+    text_shares_fonts = not _uses_cm_super(doc)
 
     for page_idx in range(len(doc)):
         page_start = len(result)
         orphans = []  # [(bbox, [Span, ...]), ...] math-only lines no block line claimed
         page = doc[page_idx]
         raw = page.get_text("rawdict")
+        _drop_rotated_lines(raw)
         _add_span_text(raw)
         paragraph_bboxes = [
             b["bbox"] for b in raw["blocks"]
@@ -384,7 +531,7 @@ def extract_lines(doc) -> list[TranslatableLine]:
             block_text = ""
             for line in block["lines"]:
                 for s in line["spans"]:
-                    if is_text_span(s["font"], s["text"], roman_is_text):
+                    if is_text_span(s["font"], s["text"], text_shares_fonts):
                         block_text += s["text"]
             if _is_english_block(block_text):
                 continue
@@ -404,15 +551,19 @@ def extract_lines(doc) -> list[TranslatableLine]:
             block_lines_start = len(result)  # track where this block's lines start
 
             # Merge lines at the same y-level (e.g. fraction parts + surrounding text)
-            merged_block_lines = _merge_same_y_lines(block["lines"], roman_is_text)
+            merged_block_lines = _merge_same_y_lines(block["lines"], text_shares_fonts)
 
             for line_data in merged_block_lines:
                 spans = []
-                for s in line_data["spans"]:
+                raw_spans = line_data["spans"]
+                if text_shares_fonts:
+                    _mark_math_variables(raw_spans)
+                    raw_spans = _split_mixed_spans(raw_spans)
+                for s in raw_spans:
                     text = s["text"]
-                    if roman_is_text and SHARED_ROMAN_FONT_RE.search(s["font"]):
+                    if text_shares_fonts and is_shared_text_font(s["font"]):
                         text = _compose_accents(text)
-                    is_text = is_text_span(s["font"], text, roman_is_text)
+                    is_text = is_text_span(s["font"], text, text_shares_fonts)
                     spans.append(Span(
                         text=text,
                         font=s["font"],
@@ -421,10 +572,13 @@ def extract_lines(doc) -> list[TranslatableLine]:
                         ink_bbox=tuple(s["ink_bbox"]),
                         origin=tuple(s["origin"]),
                         is_text=is_text,
+                        style=_get_font_style(s["font"], s.get("flags", 0)),
+                        is_variable=s.get("is_variable", False),
                     ))
                 if not spans:
                     continue
-                if roman_is_text:
+                if text_shares_fonts:
+                    _demote_script_spans(spans)
                     _resolve_wordless_spans(spans)
                 spans = _merge_text_runs(spans)
 
@@ -440,7 +594,7 @@ def extract_lines(doc) -> list[TranslatableLine]:
                     if span.is_text:
                         in_math = False
                         parts.append(span.text)
-                        style = _get_font_style(span.font)
+                        style = span.style
                         if text_styles and text_styles[-1][1] == style:
                             text_styles[-1] = (text_styles[-1][0] + len(span.text), style)
                         else:
@@ -693,7 +847,7 @@ def _dominant_font_style(spans: list[Span]) -> str:
     style_counts = {}
     for s in spans:
         if s.is_text and s.text.strip():
-            style = _get_font_style(s.font)
+            style = s.style
             style_counts[style] = style_counts.get(style, 0) + len(s.text)
     if not style_counts:
         return "regular"

@@ -1,9 +1,9 @@
 import pytest
 
-from conftest import FONT_VARIANTS, open_fixture
+from conftest import FONT_VARIANTS, OTHER_TYPEFACES, open_fixture
 from translator.extract import (
-    Span, TranslatableLine, _compose_accents, _is_english_block, _merge_same_y_lines,
-    _merge_split_lines,
+    Span, TranslatableLine, _compose_accents, _is_english_block, _mark_math_variables,
+    _merge_same_y_lines, _merge_split_lines,
     _resolve_wordless_spans, extract_lines,
 )
 
@@ -120,5 +120,28 @@ def test_overlapping_text_lines_merge_only_on_a_shared_baseline():
     radical_and_next_line = [raw_line("müssen, wo", (72, 356, 540, 368), 366),
                              raw_line("arbeiten", (465, 342, 540, 363), 354)]
 
-    assert len(_merge_same_y_lines(same_line, roman_is_text=False)) == 1
-    assert len(_merge_same_y_lines(radical_and_next_line, roman_is_text=False)) == 2
+    assert len(_merge_same_y_lines(same_line, text_shares_fonts=False)) == 1
+    assert len(_merge_same_y_lines(radical_and_next_line, text_shares_fonts=False)) == 2
+
+
+@pytest.mark.parametrize("variant", OTHER_TYPEFACES)
+def test_typefaces_that_set_math_letters_in_the_text_italic(variant):
+    templates = [line.template for line in extract_lines(open_fixture(variant))]
+
+    assert templates[0] == "Fonctions continues"
+    assert templates[1] == "Soit{M0} une fonction continue sur{M1} telle que{M2} pour tout{M3}"
+    assert templates[3].startswith(
+        "La dérivée vérifie{M0}, et nous avons donc démontré le résultat principal")
+
+
+def test_italic_phrases_are_not_math_variables():
+    def raw(text, font):
+        return {"text": text, "font": font, "flags": 0}
+
+    spans = [raw("qui ne semblent", "LMRoman10-Regular"), raw(" ", "LMRoman10-Regular"),
+             raw("a", "LMRoman10-Italic"), raw(" ", "LMRoman10-Italic"),
+             raw("priori", "LMRoman10-Italic"), raw(" couvrir une fonction", "LMRoman10-Regular"),
+             raw("f", "LMRoman10-Italic"), raw(" continue", "LMRoman10-Regular")]
+    _mark_math_variables(spans)
+
+    assert [s["text"] for s in spans if s["is_variable"]] == ["f"]

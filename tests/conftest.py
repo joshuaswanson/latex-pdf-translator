@@ -11,6 +11,10 @@ FIXTURES = Path(__file__).parent / "fixtures"
 # Latin Modern, and the default OT1 Computer Modern fonts.
 FONT_VARIANTS = ["cmsuper", "lmodern", "cm"]
 
+# The same document in Palatino (mathpazo) and Times (mathptmx), which set
+# math letters in the italic text font.
+OTHER_TYPEFACES = ["palatino", "times"]
+
 FRENCH_TO_ENGLISH = {
     "Fonctions": "Continuous", "continues": "functions", "Soit": "Let",
     "une": "be a", "fonction": "function", "continue": "continuous",
