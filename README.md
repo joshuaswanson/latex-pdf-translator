@@ -75,8 +75,10 @@ Rendering takes roughly 0.8 MB of memory per page.
 
 ## Limitations
 
+- Only PDFs typeset in Computer Modern, Latin Modern or cm-super are recognized. Papers in other typefaces (Times, Palatino) and scanned PDFs give "No translatable text found"
 - Lines that contain math are translated one line at a time. LLM engines see the neighboring lines as context, the other engines do not
-- Local models occasionally leave a line in the original language. Running again retries it, and `--fallback google` translates whatever remains
+- LLM engines, local models most of all, occasionally leave a line in the original language. Running again retries it, and `--fallback google` translates whatever remains
+- Where a PDF stores a formula character and a word in one piece of text, the whole piece is treated as prose
 - Big delimiters and operators (CMEX), script and Fraktur letters, small caps, and glyphs in unknown fonts are copied from the original page
 - Translated lines wider than their text column are condensed horizontally to at most 70% of their natural width; beyond that they overflow
 - Terminology fixes for common machine translation mistakes in math prose apply only to English output from the google, deepl, azure and google-cloud engines
