@@ -84,6 +84,8 @@ BACKGROUND_SAMPLE_DPI = 36
 # Translated text that would overflow its block is condensed horizontally,
 # down to this fraction of its natural width.
 MIN_TEXT_SCALE = 0.7
+# Text that still overflows at that limit is also set at this fraction of its size
+OVERFLOW_FONT_SCALE = 0.85
 
 
 class PageText:
@@ -506,6 +508,10 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
     if line.is_toc:
         right_limit = _toc_text_limit(line, fontsize, toc_font_obj)
     text_scale = _fit_text_scale(line, styled_segments, fontsize, right_limit - x0)
+    if text_scale == MIN_TEXT_SCALE:
+        # Condensing alone was not enough, so the text also gets smaller
+        fontsize *= OVERFLOW_FONT_SCALE
+        text_scale = _fit_text_scale(line, styled_segments, fontsize, right_limit - x0)
 
     # Render from left to right. Condensed text is scaled around the line
     # start, so each segment is placed at its unscaled position.
