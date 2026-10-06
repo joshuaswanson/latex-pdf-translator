@@ -19,6 +19,19 @@ def test_translates_fixture_end_to_end(variant):
     assert "XXXM" not in text and "{M" not in text
 
 
+@pytest.mark.parametrize("variant, typeface", [
+    ("cm", "CMU"), ("times", "Times"), ("palatino", "Pagella"),
+])
+def test_translated_text_is_set_in_the_original_typeface(variant, typeface):
+    result = translate_pdf(fixture_pdf_bytes(variant), FakeEngine())
+
+    with pymupdf.open("pdf", result) as doc:
+        spans = [s for b in doc[0].get_text("dict")["blocks"] for l in b.get("lines", [])
+                 for s in l["spans"]]
+    theorem_fonts = {s["font"] for s in spans if "bounded" in s["text"] or "Theorem" in s["text"]}
+    assert theorem_fonts and all(typeface in font for font in theorem_fonts)
+
+
 @pytest.mark.parametrize("variant", FONT_VARIANTS)
 def test_translated_text_stays_inside_the_text_block(variant):
     with pymupdf.open("pdf", fixture_pdf_bytes(variant)) as doc:
@@ -86,3 +99,20 @@ def test_unchanged_line_touched_by_a_neighbor_redaction_is_redrawn():
                                       [(with_radical, "mot"), (far_below, "mot")])
 
     assert [line for line, _ in hit] == [with_radical]
+
+
+class LongWindedEngine(FakeEngine):
+    def translate_batch(self, texts, context=("", "")):
+        return [f"{t} {t}" if "{M" not in t else t for t in super().translate_batch(texts)]
+
+
+@pytest.mark.parametrize("variant", FONT_VARIANTS + OTHER_TYPEFACES)
+def test_text_twice_as_long_stays_inside_the_text_block(variant):
+    with pymupdf.open("pdf", fixture_pdf_bytes(variant)) as doc:
+        right_margin = max(b[2] for b in doc[0].get_text("blocks"))
+
+    result = translate_pdf(fixture_pdf_bytes(variant), LongWindedEngine())
+
+    with pymupdf.open("pdf", result) as doc:
+        words = doc[0].get_text("words")
+    assert max(w[2] for w in words) <= right_margin + 1

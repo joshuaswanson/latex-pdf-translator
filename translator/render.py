@@ -1,5 +1,6 @@
 import re
 from collections import Counter
+from functools import cache
 from pathlib import Path
 
 import pymupdf
@@ -24,6 +25,37 @@ FONT_OBJECTS = {
     style: pymupdf.Font(fontfile=str(path))
     for style, path in FONT_FILES.items()
 }
+
+@cache
+def _times_fonts() -> dict[str, pymupdf.Font]:
+    """MuPDF's built-in Times, the Nimbus Roman design LaTeX's Times packages embed."""
+    names = {"regular": "tiro", "bold": "tibo", "italic": "tiit", "bolditalic": "tibi"}
+    return {style: pymupdf.Font(name) for style, name in names.items()}
+
+
+@cache
+def _palatino_fonts() -> dict[str, pymupdf.Font]:
+    return {style: pymupdf.Font(fontfile=str(FONT_DIR / f"texgyrepagella-{style}.otf"))
+            for style in FONT_FILES}
+
+
+# Typefaces other than Computer Modern, matched by the original font's name
+TYPEFACE_FONTS = [
+    (re.compile(r"Times|NimbusRom|Termes", re.IGNORECASE), _times_fonts),
+    (re.compile(r"Palatino|Palladio|Pagella", re.IGNORECASE), _palatino_fonts),
+]
+
+
+def _text_fonts(line: TranslatableLine) -> dict[str, pymupdf.Font]:
+    """Fonts for a line's translated text, by style, in the line's own typeface."""
+    for span in line.spans:
+        if span.is_text and span.text.strip():
+            for pattern, load_fonts in TYPEFACE_FONTS:
+                if pattern.search(span.font):
+                    return load_fonts()
+            break
+    return FONT_OBJECTS
+
 
 # Latin Modern Math: comprehensive math font from the CM family.
 # Has 99.9% coverage of all math symbols used in LaTeX PDFs.
@@ -84,8 +116,10 @@ BACKGROUND_SAMPLE_DPI = 36
 # Translated text that would overflow its block is condensed horizontally,
 # down to this fraction of its natural width.
 MIN_TEXT_SCALE = 0.7
-# Text that still overflows at that limit is also set at this fraction of its size
+# Text that still overflows at that limit is also set smaller, by at least
+# the first fraction and at most the second
 OVERFLOW_FONT_SCALE = 0.85
+MIN_FONT_SCALE = 0.6
 
 
 class PageText:
@@ -503,15 +537,17 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
     styled_segments = _build_style_map(line, translated)
     styled_segments = _fix_style_boundaries(styled_segments)
 
-    toc_font_obj = FONT_OBJECTS[line.font_style]
+    fonts = _text_fonts(line)
+    toc_font_obj = fonts[line.font_style]
     right_limit = line.max_x1
     if line.is_toc:
         right_limit = _toc_text_limit(line, fontsize, toc_font_obj)
-    text_scale = _fit_text_scale(line, styled_segments, fontsize, right_limit - x0)
-    if text_scale == MIN_TEXT_SCALE:
-        # Condensing alone was not enough, so the text also gets smaller
-        fontsize *= OVERFLOW_FONT_SCALE
-        text_scale = _fit_text_scale(line, styled_segments, fontsize, right_limit - x0)
+    available = right_limit - x0
+    fitting_scale = _fitting_text_scale(line, styled_segments, fonts, fontsize, available)
+    if fitting_scale < MIN_TEXT_SCALE:
+        fontsize *= max(MIN_FONT_SCALE, min(OVERFLOW_FONT_SCALE, fitting_scale / MIN_TEXT_SCALE))
+        fitting_scale = _fitting_text_scale(line, styled_segments, fonts, fontsize, available)
+    text_scale = max(MIN_TEXT_SCALE, fitting_scale)
 
     # Render from left to right. Condensed text is scaled around the line
     # start, so each segment is placed at its unscaled position.
@@ -529,7 +565,7 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
         else:
             if not text:
                 continue
-            font_obj = FONT_OBJECTS[style]
+            font_obj = fonts[style]
             if text_scale < 1:
                 page_text.add((x0 + (x - x0) / text_scale, baseline_y), text, font_obj,
                               fontsize, morph=condense)
@@ -546,9 +582,9 @@ def _render_line_content(page, orig_page, line: TranslatableLine,
     return text_end_x
 
 
-def _fit_text_scale(line: TranslatableLine, styled_segments: list,
-                    fontsize: float, available: float) -> float:
-    """Horizontal scale for text segments so the line fits in `available`."""
+def _fitting_text_scale(line: TranslatableLine, styled_segments: list, fonts: dict,
+                        fontsize: float, available: float) -> float:
+    """Horizontal scale at which the text segments make the line fit in `available`."""
     text_width = 0
     math_width = 0
     for text, style in styled_segments:
@@ -558,10 +594,10 @@ def _fit_text_scale(line: TranslatableLine, styled_segments: list,
                 math_width += _render_math_group(None, None, line.math_spans[int(m.group(1))], 0,
                                                  None)
         else:
-            text_width += FONT_OBJECTS[style].text_length(text, fontsize=fontsize)
+            text_width += fonts[style].text_length(text, fontsize=fontsize)
     if text_width == 0 or text_width + math_width <= available + 1:
         return 1.0
-    return max(MIN_TEXT_SCALE, (available - math_width) / text_width)
+    return (available - math_width) / text_width
 
 
 def _toc_text_limit(line: TranslatableLine, fontsize: float, font_obj) -> float:
