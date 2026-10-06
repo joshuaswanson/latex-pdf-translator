@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass
 
 
@@ -827,19 +828,17 @@ def _join_hyphenated_words(lines: list[TranslatableLine]):
 def _column_right_edge(line_bbox, block_bbox, paragraph_bboxes) -> float:
     """Right edge of the text column a line sits in.
 
-    Uses the vertically nearest multi-line paragraph that spans the line's
-    left edge, so one-line blocks such as headings get the full column width.
+    Uses the most common right edge among the page's multi-line paragraphs
+    that span the line's left edge: the text width in a single-column layout,
+    the column edge in a two-column one. One-line blocks such as headings then
+    get the full column width.
     """
-    x0, y0, x1, y1 = line_bbox
+    x0, x1 = line_bbox[0], line_bbox[2]
     own_edge = max(block_bbox[2], x1)
-    candidates = [b for b in paragraph_bboxes if b[0] - 2 <= x0 <= b[2]]
-    if not candidates:
+    edges = Counter(round(b[2]) for b in paragraph_bboxes if b[0] - 2 <= x0 <= b[2])
+    if not edges:
         return own_edge
-
-    def vertical_gap(b):
-        return max(b[1] - y1, y0 - b[3], 0)
-
-    return max(own_edge, min(candidates, key=vertical_gap)[2])
+    return max(own_edge, edges.most_common(1)[0][0])
 
 
 def _dominant_font_style(spans: list[Span]) -> str:
