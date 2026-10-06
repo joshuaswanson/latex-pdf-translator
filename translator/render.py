@@ -1,4 +1,5 @@
 import re
+from collections import Counter
 from pathlib import Path
 
 import pymupdf
@@ -76,6 +77,9 @@ OPENING_DELIMITERS = set("([{\u27e8") | {"\x00", "\x02", "\x04", "\x06", "\x08",
 # dvips output thin inline images
 RULE_MAX_THICKNESS = 1.5
 RULE_MIN_WIDTH = 2
+
+# Resolution for sampling the page background behind each line
+BACKGROUND_SAMPLE_DPI = 36
 
 # Translated text that would overflow its block is condensed horizontally,
 # down to this fraction of its natural width.
@@ -155,14 +159,22 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
 
     changed = 0
     pages_to_render = sorted(page_lines)
+    lines_by_page = {}
+    for line in lines:
+        lines_by_page.setdefault(line.page_idx, []).append(line)
+    # All pages are prepared before the first glyph is copied: PyMuPDF sizes
+    # its copy map for glyph_doc at the first copy, and removing text adds
+    # objects.
+    for page_idx in pages_to_render:
+        _remove_translatable_text(glyph_doc[page_idx], lines_by_page[page_idx])
+
     total_pages = len(pages_to_render)
     if progress_callback:
         progress_callback(0, total_pages)
     for page_num, page_idx in enumerate(pages_to_render):
         page = work_doc[page_idx]
-        lines_on_page = [line for line in lines if line.page_idx == page_idx]
+        lines_on_page = lines_by_page[page_idx]
         orig_page = glyph_doc[page_idx]
-        _remove_translatable_text(orig_page, lines_on_page)
 
         # Save link annotations before redaction removes them
         saved_links = list(page.get_links())
@@ -171,8 +183,10 @@ def render_all(work_doc, orig_doc, lines: list[TranslatableLine],
         rects = [_get_whiteout_rect(page, line) for line, _ in page_lines[page_idx]]
         rules = _thin_rules(orig_doc[page_idx])
         collateral = _collateral_glyph_boxes(orig_doc[page_idx], rects, lines_on_page)
+        background = orig_doc[page_idx].get_pixmap(dpi=BACKGROUND_SAMPLE_DPI,
+                                                   colorspace=pymupdf.csRGB, alpha=False)
         for rect in rects:
-            page.add_redact_annot(rect, fill=(1, 1, 1))
+            page.add_redact_annot(rect, fill=_background_color(background, rect))
 
         # Apply all redactions at once (actually removes underlying content)
         # Pixel mode removes rules drawn as images inside the rects and leaves
@@ -242,6 +256,28 @@ def _remove_translatable_text(page, lines_on_page: list[TranslatableLine]):
                     fill=False)
     page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE,
                           graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
+
+
+def _background_color(pixmap, rect: pymupdf.Rect) -> tuple[float, float, float]:
+    """The most common color of the original page inside rect.
+
+    Text covers a minority of a line's area, so this is the paper or the
+    tinted box behind it. Erasing with it avoids white patches on tints.
+    """
+    scale = BACKGROUND_SAMPLE_DPI / 72
+    x0 = max(0, int(rect.x0 * scale))
+    x1 = min(pixmap.width, int(rect.x1 * scale) + 1)
+    y0 = max(0, int(rect.y0 * scale))
+    y1 = min(pixmap.height, int(rect.y1 * scale) + 1)
+    if x0 >= x1 or y0 >= y1:
+        return (1, 1, 1)
+    samples, stride = pixmap.samples, pixmap.stride
+    counts = Counter()
+    for y in range(y0, y1):
+        row = samples[y * stride + 3 * x0:y * stride + 3 * x1]
+        counts.update(row[i:i + 3] for i in range(0, len(row), 3))
+    r, g, b = counts.most_common(1)[0][0]
+    return (r / 255, g / 255, b / 255)
 
 
 def _collateral_glyph_boxes(orig_page, rects: list[pymupdf.Rect],
