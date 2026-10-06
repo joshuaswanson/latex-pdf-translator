@@ -360,6 +360,12 @@ def translate_lines(lines: list[TranslatableLine], engine: Engine,
     try:
         translated = _run_engine(engine, texts, list(range(len(texts))), cache, progress_callback)
         failed = [i for i, t in enumerate(translated) if t is None]
+        if engine.retries_failures and failed:
+            print(f"  {len(failed)} untranslated, asking {engine.label} again")
+            retried = _run_engine(engine, texts, failed, cache, None)
+            for i in failed:
+                translated[i] = retried[i]
+            failed = [i for i in failed if translated[i] is None]
         if fallback and failed:
             print(f"  {len(failed)} untranslated, trying {fallback.label}")
             retried = _run_engine(fallback, texts, failed, cache, None)

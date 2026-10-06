@@ -186,3 +186,20 @@ def test_fallback_engine_translates_what_the_main_engine_failed_on():
 
     assert result == ["LLM: ligne une", "Proof of avec {M0}"]
     assert fallback.batches == [["avec {M0}"]]
+
+
+def test_engines_that_retry_failures_get_a_second_pass():
+    class FlakyEngine(FakeEngine):
+        retries_failures = True
+        max_batch_items = 1
+
+        def translate_batch(self, texts, context=("", "")):
+            self.batches.append(texts)
+            first_attempt = sum(batch == texts for batch in self.batches) == 1
+            return [None if first_attempt and "deux" in text else text.upper() for text in texts]
+
+    lines = [make_line("ligne une", y=100), make_line("ligne deux", y=130)]
+    engine = FlakyEngine()
+
+    assert translate_lines(lines, engine) == ["LIGNE UNE", "LIGNE DEUX"]
+    assert engine.batches == [["ligne une"], ["ligne deux"], ["ligne deux"]]

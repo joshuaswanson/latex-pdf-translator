@@ -36,6 +36,9 @@ class Engine:
     max_concurrency = 1
     # Google Translate style engines make known mistakes in English math prose
     apply_term_fixes = False
+    # Engines whose failures are worth a second pass. An LLM that mangled a
+    # line often gets it right when asked again.
+    retries_failures = False
 
     def __init__(self, source: str, target: str, *, api_key: str | None = None,
                  region: str | None = None, model: str | None = None,

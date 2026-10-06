@@ -31,6 +31,7 @@ class LLMEngine(Engine):
     default_model = ""
     max_batch_items = 40
     max_batch_chars = 6000
+    retries_failures = True
 
     def __init__(self, source, target, **kwargs):
         super().__init__(source, target, **kwargs)
